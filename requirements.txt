@@ -1,0 +1,36 @@
+# Core data
+pandas>=2.0
+numpy>=1.26
+scipy>=1.11
+
+# OpenTargets
+requests>=2.31
+gql>=3.4          # GraphQL client for OpenTargets API
+
+# Dimensionality reduction & clustering (endotyping)
+umap-learn>=0.5
+hdbscan>=0.8
+scikit-learn>=1.3
+
+# Causal inference
+dowhy>=0.11
+econml>=0.15
+
+# Knowledge graphs
+networkx>=3.2
+
+# Multi-objective optimisation (Pareto front)
+pymoo>=0.6
+
+# Claude agent
+anthropic>=0.34
+
+# Visualisation
+plotly>=5.18
+dash>=2.14
+dash-cytoscape>=0.3   # network graph component
+
+# Utilities
+python-dotenv>=1.0
+pyyaml>=6.0
+tqdm>=4.66

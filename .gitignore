@@ -1,0 +1,34 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+.env.example
+
+# Data
+data/raw/
+data/processed/
+*.csv
+*.tsv
+*.h5
+*.parquet
+
+# Hetionet cache
+~/.cache/stratified_precision/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
