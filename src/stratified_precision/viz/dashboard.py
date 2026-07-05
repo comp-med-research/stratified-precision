@@ -5,7 +5,7 @@ The landing page lives in templates/index.html (plain Flask/HTML/JS).
 
 from __future__ import annotations
 
-from flask import Flask, redirect
+from flask import Flask
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -119,16 +119,13 @@ def _results_layout(result) -> html.Div:
                 style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                        "gap": "20px", "marginBottom": "20px"},
                 children=[
-                    _card("Disease Endotype Map", dcc.Graph(
-                        figure=_umap_figure(result),
-                        style={"height": "380px"},
-                        config={"displayModeBar": False},
-                    )),
-                    _card("Dynamic Pareto Front", dcc.Graph(
-                        figure=_pareto_figure(result),
-                        style={"height": "380px"},
-                        config={"displayModeBar": False},
-                    )),
+                    _card("Patient Endotype Map" if result.mode == "patient" else "Disease Endotype Map",
+                          dcc.Graph(
+                              figure=_umap_figure(result),
+                              style={"height": "380px"},
+                              config={"displayModeBar": False},
+                          )),
+                    _pareto_panel(result),
                 ],
             ),
 
@@ -167,6 +164,52 @@ def _pill(label: str, color: str) -> html.Span:
         "borderRadius": "12px", "padding": "3px 10px",
         "fontSize": "12px", "fontWeight": "500",
     })
+
+
+def _pareto_panel(result) -> html.Div:
+    """Single Pareto chart for target mode; tabbed per-endotype for patient mode."""
+    if result.mode != "patient" or not result.pareto_per_endotype:
+        return _card("Dynamic Pareto Front", dcc.Graph(
+            figure=_pareto_figure(result),
+            style={"height": "380px"},
+            config={"displayModeBar": False},
+        ))
+
+    # Build one tab per endotype
+    tabs = []
+    for eid in sorted(result.pareto_per_endotype.keys()):
+        pareto   = result.pareto_per_endotype[eid]
+        df_endo  = result.ranked_targets[result.ranked_targets["endotype_id"] == eid]
+        label    = df_endo["endotype_label"].iloc[0] if not df_endo.empty else f"Endotype {eid + 1}"
+        # Short label for the tab — just "E1", "E2" etc. to keep tabs compact
+        tab_label = f"E{eid + 1}"
+        tabs.append(dcc.Tab(
+            label=tab_label,
+            style={"fontSize": "12px", "padding": "6px 10px"},
+            selected_style={"fontSize": "12px", "padding": "6px 10px",
+                            "fontWeight": "600", "borderTop": "2px solid #5B8DEF"},
+            children=[
+                html.P(label,
+                       style={"fontSize": "11px", "color": "#888", "margin": "8px 0 0 8px",
+                               "fontWeight": "600", "textTransform": "uppercase",
+                               "letterSpacing": "0.05em"}),
+                dcc.Graph(
+                    figure=_pareto_figure_for_endotype(df_endo, pareto),
+                    style={"height": "330px"},
+                    config={"displayModeBar": False},
+                ),
+            ],
+        ))
+
+    return html.Div(style={
+        "background": "#fff", "borderRadius": "12px",
+        "border": "1px solid #ebebeb", "padding": "20px",
+    }, children=[
+        html.P("Pareto Front per Endotype",
+               style={"margin": "0 0 12px 0", "fontSize": "13px", "fontWeight": "600",
+                      "color": "#555", "textTransform": "uppercase", "letterSpacing": "0.05em"}),
+        dcc.Tabs(tabs, style={"borderBottom": "1px solid #eee"}),
+    ])
 
 
 def _card(title: str, content) -> html.Div:
@@ -222,51 +265,111 @@ def _umap_figure(result) -> go.Figure:
 
 
 def _pareto_figure(result) -> go.Figure:
-    obj    = result.pareto.objective_matrix
-    front  = result.pareto.on_front
-    df     = result.ranked_targets.reset_index(drop=True)
-    genes  = df["gene_symbol"].values if "gene_symbol" in df.columns else [""] * len(df)
-    modes  = df["predicted_failure_mode"].fillna("unknown").values if "predicted_failure_mode" in df.columns else ["unknown"] * len(df)
-    x_col  = obj.columns[0] if len(obj.columns) > 0 else None
-    y_col  = obj.columns[1] if len(obj.columns) > 1 else None
+    df     = result.ranked_targets.copy()
+    ranks  = df["pareto_rank"].values if "pareto_rank" in df.columns else np.ones(len(df), dtype=int)
+    return _pareto_scatter(df, ranks, result.pareto.objective_names)
 
+
+def _pareto_figure_for_endotype(df_endo: pd.DataFrame, pareto: "ParetoResult") -> go.Figure:
+    """Pareto scatter for a single endotype — uses stored obj_* columns."""
+    ranks = (df_endo["endotype_pareto_rank"].values
+             if "endotype_pareto_rank" in df_endo.columns
+             else np.ones(len(df_endo), dtype=int))
+    return _pareto_scatter(df_endo, ranks, pareto.objective_names)
+
+
+_RANK_STYLE = {
+    1: dict(size=14, symbol="diamond", opacity=1.0,  line_width=1.5, show_text=True),
+    2: dict(size=10, symbol="circle",  opacity=0.75, line_width=1.0, show_text=False),
+    3: dict(size=8,  symbol="circle",  opacity=0.50, line_width=0,   show_text=False),
+}
+_RANK_STYLE_DEFAULT = dict(size=6, symbol="circle", opacity=0.35, line_width=0, show_text=False)
+
+
+def _pareto_scatter(df: pd.DataFrame, ranks: np.ndarray, obj_names: list[str]) -> go.Figure:
+    """
+    One trace per Pareto rank so users can toggle ranks on/off via the legend.
+    Uses stored obj_* columns for x/y axes — safe after any sort/reindex.
+    """
+    x_col = f"obj_{obj_names[0]}" if obj_names else None
+    y_col = f"obj_{obj_names[1]}" if len(obj_names) > 1 else None
+
+    def _get_col(col):
+        if col and col in df.columns:
+            return df[col].fillna(0).values
+        return np.zeros(len(df))
+
+    xs     = _get_col(x_col)
+    ys     = _get_col(y_col)
+    genes  = df["gene_symbol"].values if "gene_symbol" in df.columns else [""] * len(df)
+    modes  = (df["predicted_failure_mode"].fillna("unknown").values
+              if "predicted_failure_mode" in df.columns else ["unknown"] * len(df))
+
+    unique_ranks = sorted(set(ranks))
     fig = go.Figure()
-    for i, (gene, mode, on_f) in enumerate(zip(genes, modes, front)):
-        color = PALETTE.get(mode, PALETTE["unknown"])
+
+    for rank in unique_ranks:
+        mask   = ranks == rank
+        style  = _RANK_STYLE.get(rank, _RANK_STYLE_DEFAULT)
+        label  = f"Rank {rank}" + (" — Pareto front" if rank == 1 else "")
+
+        r_genes = genes[mask]
+        r_modes = modes[mask]
+        r_xs    = xs[mask]
+        r_ys    = ys[mask]
+        colors  = [PALETTE.get(m, PALETTE["unknown"]) for m in r_modes]
+
         fig.add_trace(go.Scatter(
-            x=[obj[x_col].iloc[i]] if x_col else [0],
-            y=[obj[y_col].iloc[i]] if y_col else [0],
-            mode="markers+text" if on_f else "markers",
-            text=[gene] if on_f else [""],
+            x=r_xs,
+            y=r_ys,
+            mode="markers+text" if style["show_text"] else "markers",
+            name=label,
+            legendgroup=f"rank_{rank}",
+            text=r_genes if style["show_text"] else [""] * len(r_genes),
             textposition="top center",
             textfont=dict(size=9, color="#333"),
-            marker=dict(color=color if on_f else "#ddd",
-                        size=12 if on_f else 6,
-                        line=dict(width=1.5 if on_f else 0, color="#333"),
-                        symbol="diamond" if on_f else "circle"),
-            showlegend=False,
-            hovertemplate=f"<b>{gene}</b><br>{mode}<br>x: %{{x:.2f}}<br>y: %{{y:.2f}}<extra></extra>",
+            marker=dict(
+                color=colors,
+                size=style["size"],
+                opacity=style["opacity"],
+                line=dict(width=style["line_width"], color="#444"),
+                symbol=style["symbol"],
+            ),
+            customdata=list(zip(r_genes, r_modes)),
+            hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}"
+                          "<br>x: %{x:.3f}  y: %{y:.3f}<extra></extra>",
         ))
-    for mode, color in PALETTE.items():
-        fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers",
-                                 marker=dict(color=color, size=8),
-                                 name=mode.replace("_", " ").title(), showlegend=True))
+
+    x_title = (obj_names[0] if obj_names else "").replace("_", " ").title()
+    y_title = (obj_names[1] if len(obj_names) > 1 else "").replace("_", " ").title()
     fig.update_layout(
-        xaxis_title=(x_col or "").replace("_", " ").title(),
-        yaxis_title=(y_col or "").replace("_", " ").title(),
-        template="plotly_white", margin=dict(l=0, r=0, t=0, b=0),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        plot_bgcolor="#fff", paper_bgcolor="#fff",
+        xaxis_title=x_title,
+        yaxis_title=y_title,
+        template="plotly_white",
+        margin=dict(l=0, r=0, t=0, b=0),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+            font=dict(size=10),
+            itemclick="toggle",
+            itemdoubleclick="toggleothers",
+        ),
+        plot_bgcolor="#fff",
+        paper_bgcolor="#fff",
+        font=dict(size=11),
     )
     return fig
 
 
 def _target_table(result) -> dash_table.DataTable:
-    df = result.ranked_targets.head(30).reset_index(drop=True)
+    df = result.ranked_targets.head(50).reset_index(drop=True)
+    if result.mode == "patient":
+        rank_cols = ["endotype_pareto_rank", "endotype_pareto_front"]
+    else:
+        rank_cols = ["pareto_rank", "pareto_front"]
     display_cols = [c for c in [
         "gene_symbol", "endotype_label", "predicted_failure_mode",
         "association_score", "safety_score", "efficacy_score",
-        "novelty_score", "pareto_rank", "pareto_front",
+        "novelty_score", *rank_cols,
     ] if c in df.columns]
     df_display = df[display_cols].round(3)
     return dash_table.DataTable(
@@ -286,6 +389,7 @@ def _target_table(result) -> dash_table.DataTable:
             {"if": {"filter_query": '{predicted_failure_mode} = "likely_success"'},
              "backgroundColor": "#f3fff7"},
             {"if": {"filter_query": '{pareto_front} = true'}, "fontWeight": "600"},
+            {"if": {"filter_query": '{endotype_pareto_front} = true'}, "fontWeight": "600"},
         ],
         sort_action="native", page_size=15,
     )

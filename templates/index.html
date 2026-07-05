@@ -190,6 +190,80 @@
     }
     .analyse-btn:hover { opacity: 0.88; }
 
+    /* ── Disease picker ──────────────────────────────────────────────── */
+    #disease-picker {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin-top: 18px;
+      width: 100%;
+      max-width: 620px;
+      animation: fadeUp 0.25s ease;
+    }
+    #disease-picker.visible { display: flex; }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .disease-picker-label {
+      color: var(--label);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      align-self: flex-start;
+      transition: color 0.3s;
+    }
+
+    .disease-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-start;
+      width: 100%;
+    }
+
+    .disease-chip {
+      background: var(--chip-bg);
+      border: 1px solid var(--chip-border);
+      border-radius: 20px;
+      padding: 7px 16px;
+      font-size: 13px;
+      color: var(--chip-text);
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.3s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .disease-chip:hover {
+      background: var(--chip-hover-bg);
+      border-color: var(--chip-hover-bd);
+    }
+    .disease-chip.selected {
+      background: rgba(91,141,239,0.18);
+      border-color: #5B8DEF;
+      color: #5B8DEF;
+      font-weight: 600;
+    }
+    .disease-chip .score-badge {
+      font-size: 10px;
+      opacity: 0.6;
+      font-weight: 400;
+    }
+
+    .picker-skip {
+      font-size: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      align-self: flex-end;
+      transition: color 0.15s;
+    }
+    .picker-skip:hover { color: var(--text); }
+
     /* ── Chips ────────────────────────────────────────────────────────── */
     .examples { margin-top: 32px; text-align: center; }
 
@@ -282,6 +356,13 @@
     <button class="analyse-btn" id="analyse-btn">Analyse →</button>
   </div>
 
+  <!-- Disease picker — shown after gene lookup in target mode -->
+  <div id="disease-picker">
+    <p class="disease-picker-label">Select disease context</p>
+    <div class="disease-chips" id="disease-chips"></div>
+    <span class="picker-skip" id="picker-skip">Use top match automatically →</span>
+  </div>
+
   <div class="examples">
     <p class="examples-label" id="examples-label">Try an example</p>
 
@@ -304,6 +385,7 @@
       <span class="chip" data-val="Cohort B - Hypercholesterolemia">👥 Cohort B — Hypercholesterolemia</span>
       <span class="chip" data-val="Cohort C - Lung Cancer">👥 Cohort C — Lung Cancer</span>
       <span class="chip" data-val="Cohort D - Type 2 Diabetes">👥 Cohort D — Type 2 Diabetes</span>
+      <span class="chip" data-val="Cohort E - CVD / Metabolic (Coherent EHR)">🏥 Cohort E — CVD / Metabolic (Coherent EHR)</span>
     </div>
   </div>
 
@@ -364,22 +446,100 @@
     });
   });
 
+  // ── Disease picker state ─────────────────────────────────────────────
+  let selectedDiseaseId   = null;
+  let selectedDiseaseName = null;
+
+  function resetPicker() {
+    selectedDiseaseId   = null;
+    selectedDiseaseName = null;
+    document.getElementById("disease-picker").classList.remove("visible");
+    document.getElementById("disease-chips").innerHTML = "";
+  }
+
+  // Reset picker whenever mode or search input changes
+  document.getElementById("search-input").addEventListener("input", resetPicker);
+
   // ── Submit ───────────────────────────────────────────────────────────
   document.getElementById("search-input").addEventListener("keydown", e => {
-    if (e.key === "Enter") submit();
+    if (e.key === "Enter") handleAnalyseClick();
   });
-  document.getElementById("analyse-btn").addEventListener("click", submit);
+  document.getElementById("analyse-btn").addEventListener("click", handleAnalyseClick);
 
-  function submit() {
+  function handleAnalyseClick() {
     const query = document.getElementById("search-input").value.trim();
     if (!query) return;
-
     document.getElementById("error-msg").textContent = "";
+
+    // Patient mode — go straight to pipeline (no disease picker needed)
+    if (mode === "patient") { runPipeline(query, null, null); return; }
+
+    // Target mode: if disease already chosen, run immediately
+    if (selectedDiseaseId) { runPipeline(query, selectedDiseaseId, selectedDiseaseName); return; }
+
+    // Target mode: fetch top diseases and show picker
+    showDiseasePicker(query);
+  }
+
+  function showDiseasePicker(gene) {
+    const btn = document.getElementById("analyse-btn");
+    btn.textContent = "Loading…";
+    btn.disabled = true;
+
+    fetch(`/get-diseases?gene=${encodeURIComponent(gene)}`)
+      .then(r => r.json())
+      .then(data => {
+        btn.textContent = "Analyse →";
+        btn.disabled = false;
+
+        if (data.error && (!data.diseases || data.diseases.length === 0)) {
+          document.getElementById("error-msg").textContent = data.error;
+          return;
+        }
+
+        const picker = document.getElementById("disease-picker");
+        const chips  = document.getElementById("disease-chips");
+        chips.innerHTML = "";
+
+        (data.diseases || []).forEach(d => {
+          const chip = document.createElement("span");
+          chip.className = "disease-chip";
+          chip.innerHTML = `${d.disease_name} <span class="score-badge">${(d.score * 100).toFixed(0)}%</span>`;
+          chip.addEventListener("click", () => {
+            document.querySelectorAll(".disease-chip").forEach(c => c.classList.remove("selected"));
+            chip.classList.add("selected");
+            selectedDiseaseId   = d.disease_id;
+            selectedDiseaseName = d.disease_name;
+            // Short pause so user sees selection, then run
+            setTimeout(() => runPipeline(gene, selectedDiseaseId, selectedDiseaseName), 250);
+          });
+          chips.appendChild(chip);
+        });
+
+        picker.classList.add("visible");
+      })
+      .catch(err => {
+        btn.textContent = "Analyse →";
+        btn.disabled = false;
+        document.getElementById("error-msg").textContent = "Could not fetch diseases: " + err;
+      });
+  }
+
+  // "Use top match" skips the picker and takes the first disease
+  document.getElementById("picker-skip").addEventListener("click", () => {
+    const firstChip = document.querySelector(".disease-chip");
+    if (firstChip) firstChip.click();
+  });
+
+  function runPipeline(query, diseaseId, diseaseName) {
     document.getElementById("loading-overlay").classList.add("visible");
+    resetPicker();
 
     const fd = new FormData();
     fd.append("query", query);
     fd.append("mode", mode);
+    if (diseaseId)   fd.append("disease_id", diseaseId);
+    if (diseaseName) fd.append("disease_name", diseaseName);
 
     fetch("/analyse", { method: "POST", body: fd })
       .then(r => r.json())

@@ -14,6 +14,16 @@ import pandas as pd
 
 GRAPHQL_URL = "https://api.platform.opentargets.org/api/v4/graphql"
 
+_PHASE_MAP = {
+    "PHASE_1": 1, "PHASE_2": 2, "PHASE_3": 3, "PHASE_4": 4,
+    "APPROVED": 4, "CLINICAL_STAGE_I": 1, "CLINICAL_STAGE_II": 2,
+    "CLINICAL_STAGE_III": 3, "CLINICAL_STAGE_IV": 4,
+}
+
+
+def _parse_phase(phase_str: str) -> float:
+    return float(_PHASE_MAP.get((phase_str or "").upper(), 0))
+
 
 class OpenTargetsClient:
     def __init__(self, url: str = GRAPHQL_URL, max_retries: int = 3):
@@ -54,11 +64,11 @@ class OpenTargetsClient:
         query = """
         query targetDiseases($ensemblId: String!) {
           target(ensemblId: $ensemblId) {
-            associatedDiseases(size: 100) {
+            associatedDiseases {
               rows {
                 disease { id name }
                 score
-                datatypeScores { componentId score }
+                datatypeScores { id score }
               }
             }
           }
@@ -75,7 +85,7 @@ class OpenTargetsClient:
                 "score": r["score"],
             }
             for ds in r.get("datatypeScores", []):
-                rec[f"score_{ds['componentId']}"] = ds["score"]
+                rec[f"score_{ds['id']}"] = ds["score"]
             records.append(rec)
 
         return pd.DataFrame(records)
@@ -111,7 +121,7 @@ class OpenTargetsClient:
         query = """
         query interactions($ensemblId: String!, $size: Int!) {
           target(ensemblId: $ensemblId) {
-            interactions(size: $size) {
+            interactions(page: {size: $size, index: 0}) {
               rows {
                 targetB { id approvedSymbol }
                 score
@@ -141,33 +151,39 @@ class OpenTargetsClient:
         query = """
         query clinicalEvidence($ensemblId: String!) {
           target(ensemblId: $ensemblId) {
-            knownDrugs(size: 100) {
+            drugAndClinicalCandidates {
               rows {
-                drug { id name }
-                disease { id name }
-                phase
-                status
-                ctIds
+                drug { id name drugType maximumClinicalStage }
+                maxClinicalStage
+                diseases {
+                  disease { id name }
+                  diseaseFromSource
+                }
               }
             }
           }
         }
         """
         data = self._query(query, {"ensemblId": ensembl_id})
-        rows_raw = (data.get("target") or {}).get("knownDrugs", {}).get("rows", [])
+        rows_raw = (data.get("target") or {}).get("drugAndClinicalCandidates", {}).get("rows", [])
 
-        records = [
-            {
-                "drug_id": r["drug"]["id"],
-                "drug_name": r["drug"]["name"],
-                "disease_id": r["disease"]["id"],
-                "disease_name": r["disease"]["name"],
-                "phase": r["phase"],
-                "status": r["status"],
-                "trial_ids": ",".join(r.get("ctIds") or []),
-            }
-            for r in rows_raw
-        ]
+        records = []
+        for r in rows_raw:
+            drug = r["drug"]
+            phase_str = r.get("maxClinicalStage") or ""
+            phase_num = _parse_phase(phase_str)
+            for d in r.get("diseases") or []:
+                disease = d.get("disease") or {}
+                records.append({
+                    "drug_id": drug["id"],
+                    "drug_name": drug["name"],
+                    "drug_type": drug.get("drugType"),
+                    "disease_id": disease.get("id", ""),
+                    "disease_name": disease.get("name") or d.get("diseaseFromSource", ""),
+                    "phase": phase_num,
+                    "status": phase_str,
+                })
+
         return pd.DataFrame(records)
 
     def get_safety_liabilities(self, ensembl_id: str) -> pd.DataFrame:
@@ -196,6 +212,48 @@ class OpenTargetsClient:
             }
             for l in liabilities
         ]
+        return pd.DataFrame(records)
+
+    def get_disease_competitive_landscape(
+        self, disease_id: str, size: int = 15
+    ) -> pd.DataFrame:
+        """
+        Top targets associated with a disease, with per-datatype scores.
+        Used for the target-first competitive landscape Pareto analysis.
+        """
+        query = """
+        query competitiveLandscape($efoId: String!, $size: Int!) {
+          disease(efoId: $efoId) {
+            associatedTargets(page: {size: $size, index: 0}) {
+              rows {
+                target { id approvedSymbol approvedName }
+                score
+                datatypeScores { id score }
+              }
+            }
+          }
+        }
+        """
+        data = self._query(query, {"efoId": disease_id, "size": size})
+        rows_raw = (
+            (data.get("disease") or {})
+            .get("associatedTargets", {})
+            .get("rows", [])
+        )
+
+        records = []
+        for r in rows_raw:
+            t = r["target"]
+            rec = {
+                "ensembl_id": t["id"],
+                "gene_symbol": t["approvedSymbol"],
+                "gene_name": t["approvedName"],
+                "association_score": r["score"],
+            }
+            for ds in r.get("datatypeScores", []):
+                rec[f"score_{ds['id']}"] = ds["score"]
+            records.append(rec)
+
         return pd.DataFrame(records)
 
     def get_association_scores(

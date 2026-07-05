@@ -46,11 +46,15 @@ def discover_endotypes(
         If provided, falls back to KMeans with this many clusters instead
         of letting HDBSCAN choose automatically.
     """
+    n_samples = len(feature_matrix)
     X = StandardScaler().fit_transform(feature_matrix.values)
+
+    # Scale UMAP n_neighbors to dataset size — must be < n_samples
+    effective_neighbors = min(umap_n_neighbors, max(2, n_samples - 1))
 
     reducer = umap.UMAP(
         n_components=2,
-        n_neighbors=umap_n_neighbors,
+        n_neighbors=effective_neighbors,
         min_dist=umap_min_dist,
         random_state=random_state,
         metric="euclidean",
@@ -59,13 +63,29 @@ def discover_endotypes(
 
     if n_clusters is not None:
         from sklearn.cluster import KMeans
-        labels = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10).fit_predict(X)
+        k = min(n_clusters, n_samples - 1)
+        labels = KMeans(n_clusters=k, random_state=random_state, n_init=10).fit_predict(X)
+    elif n_samples < 20:
+        # Too few samples for HDBSCAN — use KMeans with 2-3 clusters
+        from sklearn.cluster import KMeans
+        k = min(3, max(2, n_samples // 5))
+        labels = KMeans(n_clusters=k, random_state=random_state, n_init=10).fit_predict(X)
     else:
+        # Scale min_cluster_size: at least 1% of samples (better for large datasets),
+        # at least the caller's hint, never more than 5% of samples.
+        pct_based = max(hdbscan_min_cluster_size, n_samples // 100)
+        effective_min_size = min(pct_based, n_samples // 20)
+        effective_min_size = max(effective_min_size, 3)
         clusterer = hdbscan.HDBSCAN(
-            min_cluster_size=hdbscan_min_cluster_size,
+            min_cluster_size=effective_min_size,
             prediction_data=True,
         )
         labels = clusterer.fit_predict(coords)
+        # If HDBSCAN assigns everything to noise, fall back to KMeans
+        if (labels >= 0).sum() == 0:
+            from sklearn.cluster import KMeans
+            k = min(3, max(2, n_samples // 8))
+            labels = KMeans(n_clusters=k, random_state=random_state, n_init=10).fit_predict(X)
 
     labels_series = pd.Series(labels, index=feature_matrix.index, name="endotype")
 
