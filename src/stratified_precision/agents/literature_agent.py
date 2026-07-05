@@ -59,7 +59,7 @@ class LiteratureAgent:
         return self._run_extraction(gene_symbols)
 
     def _run_extraction(self, gene_symbols: list[str]) -> list[TrialFailureSignal]:
-        import json
+        import json, re
         all_signals: list[TrialFailureSignal] = []
 
         for symbol in gene_symbols:
@@ -67,18 +67,29 @@ class LiteratureAgent:
             try:
                 message = self.client.messages.create(
                     model=self.model,
-                    max_tokens=1024,
+                    max_tokens=2048,
                     system=SYSTEM_PROMPT,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                text = message.content[0].text
-                # Extract JSON array from the response
+                text = next((b.text for b in message.content if hasattr(b, "text")), "")
                 start = text.find("[")
-                end = text.rfind("]") + 1
-                if start == -1 or end == 0:
+                if start == -1:
                     continue
-
-                records = json.loads(text[start:end])
+                # 1. raw_decode: stops after the first complete JSON value, ignoring
+                #    trailing text or a second array ("Extra data" errors).
+                # 2. If that fails (truncated / trailing comma), scrub common issues
+                #    and try again before giving up.
+                decoder = json.JSONDecoder()
+                try:
+                    records, _ = decoder.raw_decode(text, start)
+                except json.JSONDecodeError:
+                    # Strip markdown fences, remove trailing commas before ] or }
+                    snippet = text[start:]
+                    snippet = re.sub(r",\s*([}\]])", r"\1", snippet)
+                    # Truncate at last complete object boundary
+                    last = max(snippet.rfind("}"), 0)
+                    snippet = snippet[:last + 1] + "]"
+                    records, _ = decoder.raw_decode(snippet, 0)
                 for r in records:
                     all_signals.append(
                         TrialFailureSignal(

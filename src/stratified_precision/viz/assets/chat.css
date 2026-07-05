@@ -1,0 +1,7 @@
+/* chat.css — all chat panel styles are now inline (Dash Python dicts).
+   Only non-Dash-controlled styles live here. */
+
+#chat-toggle-btn:hover { transform: scale(1.08); }
+
+.chat-bubble p { margin: 0 0 6px 0; }
+.chat-bubble p:last-child { margin: 0; }

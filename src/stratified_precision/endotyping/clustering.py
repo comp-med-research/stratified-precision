@@ -48,6 +48,11 @@ def discover_endotypes(
     """
     n_samples = len(feature_matrix)
     X = StandardScaler().fit_transform(feature_matrix.values)
+    # Zero-variance columns → NaN/inf after scaling; near-zero variance → huge finite
+    # values that overflow float64 when squared during KMeans distance computation.
+    # nan_to_num first, then hard-clip to ±5σ (no real clinical z-score exceeds this).
+    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+    X = np.clip(X, -5.0, 5.0)
 
     # Scale UMAP n_neighbors to dataset size — must be < n_samples
     effective_neighbors = min(umap_n_neighbors, max(2, n_samples - 1))
@@ -61,15 +66,22 @@ def discover_endotypes(
     )
     coords = reducer.fit_transform(X)
 
+    import warnings as _warnings
     if n_clusters is not None:
         from sklearn.cluster import KMeans
         k = min(n_clusters, n_samples - 1)
-        labels = KMeans(n_clusters=k, random_state=random_state, n_init=10).fit_predict(X)
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("ignore", RuntimeWarning)
+            labels = KMeans(n_clusters=k, random_state=random_state,
+                            n_init=10, init="random").fit_predict(X)
     elif n_samples < 20:
         # Too few samples for HDBSCAN — use KMeans with 2-3 clusters
         from sklearn.cluster import KMeans
         k = min(3, max(2, n_samples // 5))
-        labels = KMeans(n_clusters=k, random_state=random_state, n_init=10).fit_predict(X)
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("ignore", RuntimeWarning)
+            labels = KMeans(n_clusters=k, random_state=random_state,
+                            n_init=10, init="random").fit_predict(X)
     else:
         # Scale min_cluster_size: at least 1% of samples (better for large datasets),
         # at least the caller's hint, never more than 5% of samples.
@@ -85,7 +97,10 @@ def discover_endotypes(
         if (labels >= 0).sum() == 0:
             from sklearn.cluster import KMeans
             k = min(3, max(2, n_samples // 8))
-            labels = KMeans(n_clusters=k, random_state=random_state, n_init=10).fit_predict(X)
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("ignore", RuntimeWarning)
+                labels = KMeans(n_clusters=k, random_state=random_state,
+                                n_init=10, init="random").fit_predict(X)
 
     labels_series = pd.Series(labels, index=feature_matrix.index, name="endotype")
 

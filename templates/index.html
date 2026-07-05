@@ -394,7 +394,7 @@
 
 <div id="loading-overlay">
   <div class="spinner"></div>
-  <p class="loading-text">Running pipeline…</p>
+  <p class="loading-text" id="loading-text">Running pipeline…</p>
 </div>
 
 <script src="/static/network-bg.js"></script>
@@ -545,6 +545,9 @@
       .then(r => r.json())
       .then(data => {
         if (data.ok) {
+          if (data.from_cache) {
+            document.getElementById("loading-text").textContent = "Loading from cache…";
+          }
           window.location.href = "/dashboard/";
         } else {
           document.getElementById("loading-overlay").classList.remove("visible");

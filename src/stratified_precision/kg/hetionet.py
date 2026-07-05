@@ -34,16 +34,22 @@ HETIONET_URL = (
 )
 DEFAULT_CACHE = Path.home() / ".cache" / "stratified_precision" / "hetionet-v1.0.json"
 
+_GRAPH_CACHE: Optional[nx.MultiDiGraph] = None
+
 
 # ---------------------------------------------------------------------------
 # Graph loading & caching
 # ---------------------------------------------------------------------------
 
 def load_hetionet(cache_path: Path = DEFAULT_CACHE) -> nx.MultiDiGraph:
-    """Load Hetionet from local cache, downloading if absent."""
+    """Load Hetionet; downloads once, parses once, then returns from memory."""
+    global _GRAPH_CACHE
+    if _GRAPH_CACHE is not None:
+        return _GRAPH_CACHE
     if not cache_path.exists():
         download_hetionet(cache_path)
-    return _parse_hetionet_json(cache_path)
+    _GRAPH_CACHE = _parse_hetionet_json(cache_path)
+    return _GRAPH_CACHE
 
 
 def download_hetionet(dest: Path = DEFAULT_CACHE):

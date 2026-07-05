@@ -288,7 +288,12 @@ def _run_patient_pipeline(
     literature_signals: list[TrialFailureSignal] = []
     if run_agent:
         agent = LiteratureAgent(api_key=api_key)
-        gene_symbols = [c.gene_symbol for c in ctx.candidate_targets]
+        # Deduplicate — same gene can appear in multiple endotypes; cap at 30
+        # to keep the pipeline under ~5 min even for large cohorts.
+        seen: dict[str, None] = {}
+        for c in ctx.candidate_targets:
+            seen[c.gene_symbol] = None
+        gene_symbols = list(seen.keys())[:30]
         literature_signals = agent.scan_candidates(gene_symbols)
 
     # ── Per-endotype Pareto fronts ──────────────────────────────────────
