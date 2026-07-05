@@ -30,6 +30,17 @@ def _bubble_style(role: str) -> dict:
             "alignSelf": "flex-start", "borderRadius": "12px 12px 12px 4px"}
 
 
+def _typing_indicator() -> html.Div:
+    return html.Div(
+        html.Div([
+            html.Span(className="typing-dot"),
+            html.Span(className="typing-dot"),
+            html.Span(className="typing-dot"),
+        ], className="typing-dots"),
+        style=_bubble_style("assistant"),
+    )
+
+
 PALETTE = {
     "toxicity":       "#E05A5A",
     "efficacy":       "#F0A500",
@@ -67,6 +78,7 @@ def _shell_layout() -> html.Div:
             dcc.Store(id="result-ready-store"),
             dcc.Store(id="chat-open-store", data=False),
             dcc.Store(id="chat-history-store", data=[]),
+            dcc.Store(id="chat-pending-store", data=False),
             html.Div(id="dashboard-content"),
             # Floating chat toggle button (always visible, fixed bottom-right)
             html.Button("💬", id="chat-toggle-btn", n_clicks=0,
@@ -91,6 +103,7 @@ def _shell_layout() -> html.Div:
                          "fontFamily": "Inter, -apple-system, sans-serif",
                      },
                      children=[
+                html.Div(id="chat-resize-handle"),  # styled + JS in assets/
                 html.Div(style={
                     "padding": "16px 20px", "borderBottom": "1px solid #f0f0f0",
                     "display": "flex", "justifyContent": "space-between",
@@ -108,21 +121,24 @@ def _shell_layout() -> html.Div:
                         "lineHeight": "1",
                     }),
                 ]),
-                dcc.Loading(type="dot", color="#5B8DEF",
-                            children=html.Div(
-                                id="chat-messages",
-                                style={
-                                    "flex": "1", "overflowY": "auto",
-                                    "padding": "14px 16px",
-                                    "display": "flex", "flexDirection": "column", "gap": "10px",
-                                },
-                                children=[
-                                    html.Div(
-                                        "Ask me anything about the analysis — targets, "
-                                        "endotypes, failure modes, or what to do next.",
-                                        style=_bubble_style("assistant"),
-                                    )
-                                ])),
+                dcc.Loading(
+                    type="default", color="#5B8DEF",
+                    parent_style={"flex": "1", "minHeight": "0",
+                                  "display": "flex", "flexDirection": "column"},
+                    children=html.Div(
+                        id="chat-messages",
+                        style={
+                            "flex": "1", "minHeight": "0", "overflowY": "auto",
+                            "padding": "14px 16px",
+                            "display": "flex", "flexDirection": "column", "gap": "10px",
+                        },
+                        children=[
+                            html.Div(
+                                "Ask me anything about the analysis — targets, "
+                                "endotypes, failure modes, or what to do next.",
+                                style=_bubble_style("assistant"),
+                            )
+                        ])),
                 html.Div(style={
                     "padding": "12px 14px", "borderTop": "1px solid #f0f0f0",
                     "display": "flex", "gap": "8px",
@@ -221,43 +237,57 @@ def _register_callbacks(app: Dash):
         style = {**_PANEL_BASE, "display": "flex" if new_open else "none"}
         return style, new_open
 
-    # ── Chat: send message → call Claude → update history ─────────────
+    # ── Chat: step 1 — append user message immediately, set pending ──────
     @app.callback(
         Output("chat-history-store", "data"),
         Output("chat-input", "value"),
+        Output("chat-pending-store", "data"),
         Input("chat-send-btn", "n_clicks"),
         Input("chat-input", "n_submit"),
         State("chat-input", "value"),
         State("chat-history-store", "data"),
         prevent_initial_call=True,
     )
-    def send_chat_message(n_clicks, n_submit, message, history):
+    def queue_message(n_clicks, n_submit, message, history):
         if not message or not message.strip():
-            return no_update, no_update
+            return no_update, no_update, no_update
         history = list(history or [])
         history.append({"role": "user", "content": message.strip()})
+        return history, "", True
+
+    # ── Chat: step 2 — call Claude, append reply, clear pending ──────────
+    @app.callback(
+        Output("chat-history-store", "data", allow_duplicate=True),
+        Output("chat-pending-store", "data", allow_duplicate=True),
+        Input("chat-pending-store", "data"),
+        State("chat-history-store", "data"),
+        prevent_initial_call=True,
+    )
+    def get_claude_reply(is_pending, history):
+        if not is_pending:
+            return no_update, no_update
+        history = list(history or [])
         from stratified_precision.cache import result_cache
         result = result_cache.get("latest")
         system = _build_chat_system_prompt(result)
         reply  = _chat_claude(system, history)
         history.append({"role": "assistant", "content": reply})
-        return history, ""
+        return history, False
 
-    # ── Chat: render message bubbles ───────────────────────────────────
+    # ── Chat: render bubbles + typing indicator ───────────────────────
     @app.callback(
         Output("chat-messages", "children"),
         Input("chat-history-store", "data"),
+        Input("chat-pending-store", "data"),
     )
-    def render_chat_messages(history):
+    def render_chat_messages(history, is_pending):
         greeting = html.Div(
             "Ask me anything about the analysis — targets, endotypes, "
             "failure modes, or what to do next.",
             style=_bubble_style("assistant"),
         )
-        if not history:
-            return [greeting]
         bubbles = [greeting]
-        for msg in history:
+        for msg in (history or []):
             if msg["role"] == "user":
                 bubbles.append(html.Div(msg["content"], style=_bubble_style("user")))
             else:
@@ -267,6 +297,8 @@ def _register_callbacks(app: Dash):
                                         "lineHeight": "1.65"}),
                     style=_bubble_style("assistant"),
                 ))
+        if is_pending:
+            bubbles.append(_typing_indicator())
         return bubbles
 
     # Table row click → explanation (always fires; uses original data index)
