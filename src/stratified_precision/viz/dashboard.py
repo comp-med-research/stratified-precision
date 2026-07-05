@@ -79,6 +79,7 @@ def _shell_layout() -> html.Div:
             dcc.Store(id="chat-open-store", data=False),
             dcc.Store(id="chat-history-store", data=[]),
             dcc.Store(id="chat-pending-store", data=False),
+            dcc.Store(id="agent-trace-store"),
             html.Div(id="dashboard-content"),
             # Floating chat toggle button (always visible, fixed bottom-right)
             html.Button("💬", id="chat-toggle-btn", n_clicks=0,
@@ -110,10 +111,15 @@ def _shell_layout() -> html.Div:
                     "alignItems": "center", "flexShrink": "0",
                 }, children=[
                     html.Div([
-                        html.Span("🤖", style={"fontSize": "17px", "marginRight": "8px"}),
-                        html.Span("AI Co-Scientist",
-                                  style={"fontWeight": "600", "fontSize": "15px",
-                                         "color": "#111"}),
+                        html.Span("\U0001f916", style={"fontSize": "17px", "marginRight": "8px"}),
+                        html.Div([
+                            html.Span("AI Co-Scientist",
+                                      style={"fontWeight": "600", "fontSize": "15px",
+                                             "color": "#111", "display": "block"}),
+                            html.Span("Knowledge Base + Discovery Wiki",
+                                      style={"fontSize": "11px", "color": "#aaa",
+                                             "display": "block", "marginTop": "1px"}),
+                        ]),
                     ], style={"display": "flex", "alignItems": "center"}),
                     html.Button("✕", id="chat-close-btn", n_clicks=0, style={
                         "background": "none", "border": "none", "cursor": "pointer",
@@ -213,6 +219,35 @@ def _register_callbacks(app: Dash):
                                     "color": "#333", "margin": 0}),
             ],
         )
+
+    # ── Agent trace ────────────────────────────────────────────────────
+    @app.callback(
+        Output("agent-trace-section", "children"),
+        Input("result-ready-store", "data"),
+        prevent_initial_call=True,
+    )
+    def generate_agent_trace(ready):
+        if not ready:
+            return no_update
+        from stratified_precision.cache import result_cache
+        result = result_cache.get("latest")
+        if result is None:
+            return no_update
+
+        cached = getattr(result, "agent_trace", None)
+        if not cached:
+            from stratified_precision.agents.trace_agent import generate_trace
+            cached = generate_trace(result)
+            try:
+                result.agent_trace = cached
+                ck = getattr(result, "_cache_key", None)
+                if ck:
+                    from stratified_precision.result_store import save_result
+                    save_result(ck, result)
+            except Exception:
+                pass
+
+        return _render_trace_ui(cached)
 
     # ── Chat: toggle open/closed ───────────────────────────────────────
     _PANEL_BASE = {
@@ -424,6 +459,187 @@ def _register_callbacks(app: Dash):
 
 
 # ---------------------------------------------------------------------------
+# Agent trace UI
+# ---------------------------------------------------------------------------
+
+def _render_trace_ui(agents: list[dict]) -> html.Details:
+    AGENT_COLORS = {"🔍": "#5B8DEF", "⚗️": "#F0A500", "✂️": "#4CAF7D"}
+
+    agent_cards = []
+    for ag in agents:
+        color = AGENT_COLORS.get(ag.get("icon", ""), "#888")
+        bullets = [
+            html.Li(b, style={"marginBottom": "5px", "lineHeight": "1.55", "fontSize": "13px",
+                               "color": "#E05A5A" if b.startswith("⚠️") else "#444"})
+            for b in ag.get("bullets", [])
+        ]
+        agent_cards.append(
+            html.Div(style={
+                "borderLeft": f"3px solid {color}", "paddingLeft": "14px",
+                "marginBottom": "16px",
+            }, children=[
+                html.Div(style={"display": "flex", "alignItems": "center",
+                                "marginBottom": "5px", "gap": "8px"},
+                         children=[
+                    html.Span(ag.get("icon", ""), style={"fontSize": "16px"}),
+                    html.Span(ag.get("name", ""), style={"fontWeight": "600",
+                                                          "fontSize": "13px", "color": "#111"}),
+                ]),
+                html.P(ag.get("summary", ""),
+                       style={"margin": "0 0 8px 0", "fontSize": "13px",
+                              "color": "#555", "lineHeight": "1.55"}),
+                html.Ul(bullets, style={"margin": 0, "paddingLeft": "18px"}),
+            ])
+        )
+
+    return html.Details(
+        style={"marginBottom": "20px", "background": "#fff",
+               "border": "1px solid #ebebeb", "borderRadius": "12px",
+               "padding": "0"},
+        children=[
+            html.Summary(
+                style={
+                    "padding": "14px 20px", "cursor": "pointer",
+                    "listStyle": "none", "display": "flex",
+                    "alignItems": "center", "gap": "10px",
+                    "fontSize": "13px", "fontWeight": "600", "color": "#555",
+                    "textTransform": "uppercase", "letterSpacing": "0.05em",
+                    "userSelect": "none",
+                },
+                children=[
+                    html.Span("🔬"),
+                    html.Span("Agent Reasoning Trace"),
+                    html.Span("— click to expand",
+                              style={"fontWeight": "400", "color": "#bbb",
+                                     "textTransform": "none", "letterSpacing": "0",
+                                     "fontSize": "12px"}),
+                ],
+            ),
+            html.Div(
+                style={"padding": "4px 24px 20px 24px",
+                       "borderTop": "1px solid #f0f0f0"},
+                children=agent_cards,
+            ),
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cross-disease insights card (patient mode)
+# ---------------------------------------------------------------------------
+
+def _cross_disease_section(result) -> html.Div:
+    from stratified_precision.agents.cross_disease_kb import get_kb
+    kb = get_kb(result)
+    insights = kb.get("cross_disease_insights", [])
+    failed   = kb.get("failed_trials_context", [])
+    repurpose = kb.get("repurposing_signals", [])
+
+    if not insights and not failed and not repurpose:
+        return html.Div()
+
+    insight_cards = []
+    for ins in insights:
+        shared_pills = html.Div(
+            [_pill(t, "#5B8DEF") for t in ins.get("shared_targets", [])],
+            style={"display": "flex", "flexWrap": "wrap", "gap": "6px", "marginBottom": "10px"},
+        )
+        insight_cards.append(
+            html.Div(style={
+                "background": "#f8f9ff", "border": "1px solid #dde5ff",
+                "borderLeft": "4px solid #5B8DEF",
+                "borderRadius": "10px", "padding": "16px 18px", "marginBottom": "14px",
+            }, children=[
+                # Header row: source → similar population
+                html.Div(style={"display": "flex", "alignItems": "center",
+                                "gap": "10px", "marginBottom": "10px", "flexWrap": "wrap"},
+                         children=[
+                    html.Span(ins.get("endotype", ""), style={
+                        "fontWeight": "600", "fontSize": "13px", "color": "#111"}),
+                    html.Span("↔", style={"color": "#5B8DEF", "fontWeight": "700",
+                                          "fontSize": "16px"}),
+                    html.Span(ins.get("similar_population", ""), style={
+                        "fontWeight": "600", "fontSize": "13px", "color": "#111"}),
+                    html.Span(ins.get("similarity", ""), style={
+                        "fontSize": "12px", "color": "#5B8DEF", "background": "#e8eeff",
+                        "borderRadius": "6px", "padding": "2px 8px"}),
+                ]),
+                # Shared targets
+                shared_pills,
+                # Mechanism
+                html.P(ins.get("mechanism", ""),
+                       style={"margin": "0 0 8px 0", "fontSize": "13px",
+                              "color": "#555", "lineHeight": "1.6"}),
+                # Trial opportunity — highlighted
+                html.Div(style={
+                    "background": "#edfaf3", "border": "1px solid #b7edd0",
+                    "borderRadius": "7px", "padding": "10px 14px",
+                }, children=[
+                    html.Span("\U0001f9ea Trial Opportunity: ", style={
+                        "fontWeight": "600", "fontSize": "12px", "color": "#2e7d52"}),
+                    html.Span(ins.get("trial_opportunity", ""), style={
+                        "fontSize": "12px", "color": "#2e7d52", "lineHeight": "1.6"}),
+                ]),
+            ])
+        )
+
+    right_col_items = []
+    if failed:
+        right_col_items.append(html.Div([
+            html.P("Failed Trial Context", style={
+                "margin": "0 0 8px 0", "fontSize": "11px", "fontWeight": "600",
+                "color": "#888", "textTransform": "uppercase", "letterSpacing": "0.05em"}),
+            html.Ul([
+                html.Li(f, style={"fontSize": "12px", "color": "#666",
+                                  "lineHeight": "1.55", "marginBottom": "5px"})
+                for f in failed
+            ], style={"margin": 0, "paddingLeft": "16px"}),
+        ], style={"marginBottom": "16px"}))
+
+    if repurpose:
+        right_col_items.append(html.Div([
+            html.P("Repurposing Signals", style={
+                "margin": "0 0 8px 0", "fontSize": "11px", "fontWeight": "600",
+                "color": "#4CAF7D", "textTransform": "uppercase", "letterSpacing": "0.05em"}),
+            html.Ul([
+                html.Li(r, style={"fontSize": "12px", "color": "#2e7d52",
+                                  "lineHeight": "1.55", "marginBottom": "5px"})
+                for r in repurpose
+            ], style={"margin": 0, "paddingLeft": "16px"}),
+        ]))
+
+    body = html.Div(style={
+        "display": "grid",
+        "gridTemplateColumns": "1fr 340px" if right_col_items else "1fr",
+        "gap": "24px",
+    }, children=[
+        html.Div(insight_cards),
+        html.Div(right_col_items) if right_col_items else html.Div(),
+    ])
+
+    return html.Div(style={"marginBottom": "20px"}, children=[
+        html.Div(style={
+            "background": "#fff", "border": "1px solid #ebebeb",
+            "borderRadius": "12px", "padding": "20px 24px",
+        }, children=[
+            html.P(style={
+                "margin": "0 0 16px 0", "fontSize": "13px", "fontWeight": "600",
+                "color": "#555", "textTransform": "uppercase", "letterSpacing": "0.05em",
+                "display": "flex", "alignItems": "center", "gap": "8px",
+            }, children=[
+                html.Span("\U0001f9ec"),
+                html.Span("Cross-Disease Insights"),
+                html.Span("— endotypes that transcend diagnostic boundaries",
+                          style={"fontWeight": "400", "color": "#bbb",
+                                 "textTransform": "none", "letterSpacing": "0",
+                                 "fontSize": "12px"}),
+            ]),
+            body,
+        ]),
+    ])
+
+
+# ---------------------------------------------------------------------------
 # Results layout
 # ---------------------------------------------------------------------------
 
@@ -477,9 +693,16 @@ def _results_layout(result) -> html.Div:
                 ],
             ),
 
+            # Agent reasoning trace (populated by callback, collapsible)
+            dcc.Loading(type="dot", color="#5B8DEF",
+                        children=html.Div(id="agent-trace-section")),
+
             # AI narrative summary (populated by callback after page renders)
             dcc.Loading(type="dot", color="#5B8DEF",
                         children=html.Div(id="nl-summary")),
+
+            # Cross-disease insights (patient mode only — rendered from static KB)
+            _cross_disease_section(result) if result.mode == "patient" else html.Div(),
 
             # Competitive landscape graph (target mode only)
             _graph_section(result) if result.mode == "target" else html.Div(),
@@ -1017,6 +1240,9 @@ def _generate_result_summary(result) -> str:
 
 
 def _build_summary_prompt(result) -> str:
+    from stratified_precision.agents.cross_disease_kb import get_kb, format_for_prompt
+    kb_text = format_for_prompt(get_kb(result))
+
     df = result.ranked_targets
     top5 = df.head(5)
 
@@ -1031,6 +1257,7 @@ def _build_summary_prompt(result) -> str:
             f"failure mode: {r.get('predicted_failure_mode','unknown')}"
             for _, r in top5.iterrows()
         )
+        kb_section = f"\n{kb_text}\n" if kb_text else ""
         return f"""Summarize these drug target analysis results in 3–4 sentences for a clinician scientist. Be specific, evidence-grounded, and end with a clear therapeutic recommendation.
 
 Mode: Target-first competitive landscape
@@ -1039,7 +1266,8 @@ Competing targets analysed: {len(df)}
 Pareto objectives: {', '.join(result.pareto.objective_names)}
 Top 5 ranked targets:
 {targets_txt}
-
+{kb_section}
+If cross-disease similarities are listed above, mention the most clinically relevant one in your summary.
 Use **bold** for gene names and key terms. No bullet points. Open with the disease context and the key Pareto-front finding."""
 
     # patient mode
@@ -1054,14 +1282,16 @@ Use **bold** for gene names and key terms. No bullet points. Open with the disea
     endo_txt = "\n".join(endotype_rows) if endotype_rows else "N/A"
 
     n_patients = int(result.endotyping.labels[result.endotyping.labels >= 0].count())
-    return f"""Summarize these patient cohort analysis results in 3–4 sentences for a clinician scientist. Be specific about the patient subgroups, their biological distinctiveness, and the highest-priority targets per endotype.
+    kb_section = f"\n{kb_text}\n" if kb_text else ""
+    return f"""Summarize these patient cohort analysis results in 4–5 sentences for a clinician scientist. Cover: (1) cohort stratification, (2) highest-priority targets per endotype, (3) proactively mention the most striking cross-disease similarity and what it implies for trial design.
 
 Mode: Patient-first (Coherent EHR synthetic cohort)
 Patients: {n_patients} | Endotypes identified: {result.endotyping.n_clusters}
 Top target per endotype:
 {endo_txt}
-
-Use **bold** for endotype names and gene symbols. No bullet points. Open with a summary of the cohort stratification."""
+{kb_section}
+This is critical: if cross-disease similarities are listed above, you MUST volunteer the most important one unprompted — the clinician has not asked for it. Frame it as a discovery ("Notably, Subgroup X shows striking similarity to...").
+Use **bold** for endotype names, gene symbols, and the cross-disease finding. No bullet points."""
 
 
 def _build_chat_system_prompt(result) -> str:
@@ -1090,7 +1320,11 @@ def _build_chat_system_prompt(result) -> str:
         ctx = (f"Patient-first cohort (Coherent EHR synthetic data)\n"
                f"{result.endotyping.n_clusters} endotypes: {', '.join(str(e) for e in endo_labels)}")
 
-    return f"""You are an AI co-scientist embedded in the Stratified Precision drug discovery platform. You have full knowledge of the current analysis and help the clinician interpret findings, assess risks, and plan next steps.
+    from stratified_precision.agents.cross_disease_kb import get_kb, format_for_prompt
+    kb_text = format_for_prompt(get_kb(result))
+    kb_section = f"\n\nKNOWLEDGE BASE — cross-disease similarities, failed trials, repurposing signals:\n{kb_text}" if kb_text else ""
+
+    return f"""You are an AI co-scientist embedded in the Stratified Precision drug discovery platform. You have full knowledge of the current analysis AND a curated knowledge base of cross-disease similarities, failed trials, and repurposing signals. Use both to help the clinician.
 
 Current analysis:
 {ctx}
@@ -1098,8 +1332,14 @@ Pareto objectives: {', '.join(result.pareto.objective_names)}
 
 Top ranked targets:
 {targets_txt}
+{kb_section}
 
-Be concise, clinically grounded, and specific. Use markdown. Reference actual scores when discussing a target. You may ask clarifying questions to help the user dig deeper."""
+Instructions:
+- Be concise, clinically grounded, and specific. Use markdown.
+- Reference actual scores when discussing a target.
+- Proactively volunteer cross-disease insights from the knowledge base when relevant — don't wait to be asked. For example, if a user asks about a target, mention if it has cross-disease relevance.
+- If you notice that two patient subgroups across different diseases are more similar to each other than to their own diagnostic cohorts, say so explicitly and explain the trial design implications.
+- You may ask clarifying questions to help the user dig deeper."""
 
 
 def _chat_claude(system_prompt: str, history: list[dict]) -> str:
@@ -1141,6 +1381,21 @@ def _generate_explanation(target_data: dict) -> str:
 
         context_line = f"Patient subgroup: {endotype}\n" if endotype else ""
 
+        from stratified_precision.cache import result_cache as _rc
+        from stratified_precision.agents.cross_disease_kb import get_kb, format_for_prompt
+        _res = _rc.get("latest")
+        kb_note = ""
+        if _res:
+            kb = get_kb(_res)
+            for ins in kb.get("cross_disease_insights", []):
+                if gene.upper() in [t.upper() for t in ins.get("shared_targets", [])]:
+                    kb_note = (
+                        f"\nCross-disease knowledge base note: {gene} is also a shared target "
+                        f"between {ins['endotype']} and {ins['similar_population']}. "
+                        f"{ins['mechanism']} Trial opportunity: {ins['trial_opportunity']}"
+                    )
+                    break
+
         prompt = f"""You are an AI co-scientist in drug discovery helping a clinician interpret a target ranking.
 
 Gene / target: {gene}
@@ -1148,13 +1403,14 @@ Disease context: {disease}
 {context_line}Pareto rank: {rank} (rank 1 = Pareto-optimal across all objectives)
 OpenTargets association score: {assoc:.3f} (0–1; higher = stronger multi-evidence support)
 Novelty score: {novelty:.3f} (1.0 = no approved drugs yet; 0 = well-validated, crowded)
-Predicted failure mode: {failure}
+Predicted failure mode: {failure}{kb_note}
 
 Write a concise, precise explanation in 3–4 sentences for a clinician scientist:
 1. Biological rationale — why does this gene matter mechanistically for the disease?
 2. Evidence quality — what does the association score imply about genetic/clinical validation?
 3. Development risk — what does the failure mode prediction mean for a real programme?
 4. Opportunity — given the novelty score, what modality (antibody, small molecule, ASO, cell therapy) is most tractable?
+{"5. Cross-disease angle — briefly mention the cross-disease relevance noted above and its trial design implication." if kb_note else ""}
 
 Stay grounded in the data above. Do not invent clinical trial names or unpublished results. No bullet points."""
 
