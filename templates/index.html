@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stratified Precision</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── Theme tokens ─────────────────────────────────────────────────── */
+    :root {
+      --bg:            #0a0f1e;
+      --text:          #ffffff;
+      --text-muted:    rgba(255,255,255,0.45);
+      --label:         rgba(255,255,255,0.3);
+      --search-bg:     rgba(255,255,255,0.07);
+      --search-border: rgba(255,255,255,0.12);
+      --input-color:   #ffffff;
+      --input-ph:      rgba(255,255,255,0.35);
+      --chip-bg:       rgba(255,255,255,0.06);
+      --chip-border:   rgba(255,255,255,0.13);
+      --chip-text:     rgba(255,255,255,0.72);
+      --chip-hover-bg: rgba(91,141,239,0.15);
+      --chip-hover-bd: rgba(91,141,239,0.4);
+      --btn-inactive-bg:     rgba(255,255,255,0.06);
+      --btn-inactive-border: rgba(255,255,255,0.15);
+      --btn-inactive-text:   rgba(255,255,255,0.7);
+      --toggle-bg:     rgba(255,255,255,0.1);
+      --toggle-border: rgba(255,255,255,0.15);
+      --overlay-bg:    rgba(10,15,30,0.75);
+      --error-color:   #E05A5A;
+    }
+
+    [data-theme="light"] {
+      --bg:            #ffffff;
+      --text:          #1a1a2e;
+      --text-muted:    rgba(26,26,46,0.5);
+      --label:         rgba(26,26,46,0.35);
+      --search-bg:     rgba(255,255,255,0.8);
+      --search-border: rgba(0,0,0,0.1);
+      --input-color:   #1a1a2e;
+      --input-ph:      rgba(26,26,46,0.35);
+      --chip-bg:       rgba(255,255,255,0.7);
+      --chip-border:   rgba(0,0,0,0.1);
+      --chip-text:     #374151;
+      --chip-hover-bg: rgba(91,141,239,0.08);
+      --chip-hover-bd: rgba(91,141,239,0.3);
+      --btn-inactive-bg:     rgba(255,255,255,0.7);
+      --btn-inactive-border: rgba(0,0,0,0.12);
+      --btn-inactive-text:   #555;
+      --toggle-bg:     rgba(0,0,0,0.05);
+      --toggle-border: rgba(0,0,0,0.1);
+      --overlay-bg:    rgba(248,247,244,0.82);
+      --error-color:   #c0392b;
+    }
+
+    /* ── Base ─────────────────────────────────────────────────────────── */
+    body {
+      min-height: 100vh;
+      overflow: hidden;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      transition: background 0.3s, color 0.3s;
+    }
+
+    #network-bg {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      transition: opacity 0.4s;
+    }
+
+    /* ── Theme toggle ─────────────────────────────────────────────────── */
+    #theme-toggle {
+      position: fixed;
+      top: 20px;
+      right: 24px;
+      z-index: 10;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1px solid var(--toggle-border);
+      background: var(--toggle-bg);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      cursor: pointer;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, border-color 0.2s, transform 0.15s;
+    }
+    #theme-toggle:hover { transform: scale(1.1); }
+
+    /* ── Content ──────────────────────────────────────────────────────── */
+    .content {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+      color: var(--text);
+      transition: color 0.3s;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 15px;
+      margin-bottom: 40px;
+      transition: color 0.3s;
+    }
+
+    /* ── Mode toggle ──────────────────────────────────────────────────── */
+    .mode-toggle {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .mode-btn {
+      padding: 8px 20px;
+      border-radius: 8px;
+      border: 1px solid var(--btn-inactive-border);
+      background: var(--btn-inactive-bg);
+      color: var(--btn-inactive-text);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .mode-btn.active {
+      background: #5B8DEF;
+      border-color: #5B8DEF;
+      color: #fff;
+      font-weight: 600;
+    }
+
+    /* ── Search box ───────────────────────────────────────────────────── */
+    .search-box {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      max-width: 620px;
+      background: var(--search-bg);
+      border: 1px solid var(--search-border);
+      border-radius: 14px;
+      padding: 4px 4px 4px 18px;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 4px 32px rgba(0,0,0,0.12);
+      transition: background 0.3s, border-color 0.3s;
+    }
+
+    #search-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--input-color);
+      font-size: 15px;
+      padding: 11px 0;
+      font-family: inherit;
+      transition: color 0.3s;
+    }
+    #search-input::placeholder { color: var(--input-ph); }
+
+    .analyse-btn {
+      background: #5B8DEF;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 22px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 2px 12px rgba(91,141,239,0.35);
+      transition: opacity 0.15s;
+    }
+    .analyse-btn:hover { opacity: 0.88; }
+
+    /* ── Chips ────────────────────────────────────────────────────────── */
+    .examples { margin-top: 32px; text-align: center; }
+
+    .examples-label {
+      color: var(--label);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+      transition: color 0.3s;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      max-width: 680px;
+    }
+
+    .chip {
+      background: var(--chip-bg);
+      border: 1px solid var(--chip-border);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 13px;
+      color: var(--chip-text);
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.3s;
+    }
+    .chip:hover {
+      background: var(--chip-hover-bg);
+      border-color: var(--chip-hover-bd);
+    }
+
+    #error-msg {
+      margin-top: 16px;
+      color: var(--error-color);
+      font-size: 14px;
+      min-height: 20px;
+    }
+
+    /* ── Loading overlay ──────────────────────────────────────────────── */
+    #loading-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: var(--overlay-bg);
+      backdrop-filter: blur(6px);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+    }
+    #loading-overlay.visible { display: flex; }
+
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid rgba(91,141,239,0.2);
+      border-top-color: #5B8DEF;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-text { color: var(--text-muted); font-size: 14px; }
+  </style>
+</head>
+<body>
+
+<canvas id="network-bg"></canvas>
+
+<button id="theme-toggle" title="Toggle light / dark mode">🌙</button>
+
+<main class="content">
+  <h1>Stratified Precision</h1>
+  <p class="subtitle">AI co-scientist for drug target identification</p>
+
+  <div class="mode-toggle">
+    <button class="mode-btn active" data-mode="target">Gene / Protein</button>
+    <button class="mode-btn" data-mode="patient">Patient cohort</button>
+  </div>
+
+  <div class="search-box">
+    <input id="search-input" type="text"
+           placeholder="Enter a gene (e.g. PCSK9) or disease…"
+           autocomplete="off" />
+    <button class="analyse-btn" id="analyse-btn">Analyse →</button>
+  </div>
+
+  <div class="examples">
+    <p class="examples-label">Try an example</p>
+    <div class="chips">
+      <span class="chip" data-val="PCSK9">🧬 PCSK9</span>
+      <span class="chip" data-val="BACE1">🧬 BACE1</span>
+      <span class="chip" data-val="TYK2">🧬 TYK2</span>
+      <span class="chip" data-val="CFTR">🧬 CFTR</span>
+      <span class="chip" data-val="EGFR">🧬 EGFR</span>
+      <span class="chip" data-val="BRCA1">🧬 BRCA1</span>
+      <span class="chip" data-val="Cystic fibrosis">🫁 Cystic fibrosis</span>
+      <span class="chip" data-val="Alzheimer's disease">🧠 Alzheimer's disease</span>
+      <span class="chip" data-val="Hypercholesterolemia">❤️ Hypercholesterolemia</span>
+      <span class="chip" data-val="Lung cancer">🫁 Lung cancer</span>
+    </div>
+  </div>
+
+  <p id="error-msg"></p>
+</main>
+
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <p class="loading-text">Running pipeline…</p>
+</div>
+
+<script src="/static/network-bg.js"></script>
+<script>
+  // ── Theme toggle ─────────────────────────────────────────────────────
+  const root   = document.documentElement;
+  const toggle = document.getElementById("theme-toggle");
+
+  function applyTheme(theme) {
+    root.setAttribute("data-theme", theme);
+    // Show the opposite-mode icon so user knows what they'll switch TO
+    toggle.textContent = theme === "dark" ? "☀️" : "🌙";
+    localStorage.setItem("sp-theme", theme);
+  }
+
+  // Restore saved theme (default: light)
+  applyTheme(localStorage.getItem("sp-theme") || "dark");
+
+  toggle.addEventListener("click", () => {
+    applyTheme(root.getAttribute("data-theme") === "dark" ? "light" : "dark");
+  });
+
+  // ── Mode toggle ──────────────────────────────────────────────────────
+  let mode = "target";
+  document.querySelectorAll(".mode-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      mode = btn.dataset.mode;
+    });
+  });
+
+  // ── Chips ────────────────────────────────────────────────────────────
+  document.querySelectorAll(".chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      document.getElementById("search-input").value = chip.dataset.val;
+    });
+  });
+
+  // ── Submit ───────────────────────────────────────────────────────────
+  document.getElementById("search-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") submit();
+  });
+  document.getElementById("analyse-btn").addEventListener("click", submit);
+
+  function submit() {
+    const query = document.getElementById("search-input").value.trim();
+    if (!query) return;
+
+    document.getElementById("error-msg").textContent = "";
+    document.getElementById("loading-overlay").classList.add("visible");
+
+    const fd = new FormData();
+    fd.append("query", query);
+    fd.append("mode", mode);
+
+    fetch("/analyse", { method: "POST", body: fd })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          window.location.href = "/dashboard/";
+        } else {
+          document.getElementById("loading-overlay").classList.remove("visible");
+          document.getElementById("error-msg").textContent = data.error || "Something went wrong.";
+        }
+      })
+      .catch(err => {
+        document.getElementById("loading-overlay").classList.remove("visible");
+        document.getElementById("error-msg").textContent = "Error: " + err;
+      });
+  }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,17 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  background: #0a0f1e;
+}
+
+/*
+  Strip backgrounds from every div Dash injects between <body>
+  and our actual layout — these were covering the canvas.
+*/
+#react-entry-point,
+#_dash-app-content,
+#_dash-app-content > div,
+#_dash-app-content > div > div {
+  background: transparent !important;
+}

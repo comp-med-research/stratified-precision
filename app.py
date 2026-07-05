@@ -1,64 +1,66 @@
 """
-Entry point — run the Stratified Precision dashboard.
-
-Usage:
-    # Mode 1: target-first
-    python app.py --target BACE1
-
-    # Mode 2: patient-first
-    python app.py --patients data/raw/cohort.csv --disease EFO_0000270
+Entry point — Flask serves the landing page, Dash serves /dashboard/.
+Run: python app.py
 """
 
-import argparse
 import os
 import sys
-
 sys.path.insert(0, "src")
 
-from stratified_precision.inputs.target_mode import load_target
-from stratified_precision.inputs.patient_mode import load_patient_cohort
-from stratified_precision.pipeline import run_pipeline
-from stratified_precision.viz.dashboard import run_dashboard
+from flask import Flask, render_template, request, jsonify
+
+# ── Shared result cache (Flask route writes, Dash dashboard reads) ────
+from stratified_precision.cache import result_cache
+
+# ── Flask server ──────────────────────────────────────────────────────
+server = Flask(__name__, template_folder="templates", static_folder="static")
+server.secret_key = os.urandom(24)
+
+# ── Mount Dash results dashboard at /dashboard/ ───────────────────────
+from stratified_precision.viz.dashboard import create_dash_app
+create_dash_app(server)
+
+# ── Flask routes ──────────────────────────────────────────────────────
+
+@server.route("/")
+def index():
+    return render_template("index.html")
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Stratified Precision — Drug Target Analysis")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--target", metavar="GENE", help="Gene symbol, e.g. BACE1")
-    group.add_argument("--patients", metavar="PATH", help="Path to patient CSV")
-    parser.add_argument("--disease", metavar="EFO_ID", help="Disease ontology ID (patient mode)")
-    parser.add_argument("--no-agent", action="store_true", help="Skip literature agent (faster, offline)")
-    parser.add_argument("--no-hetionet", action="store_true", help="Skip Hetionet KG enrichment (faster, offline)")
-    parser.add_argument("--kg-hops", type=int, default=2, help="Hetionet subgraph hop depth (default: 2)")
-    parser.add_argument("--port", type=int, default=8050)
-    return parser.parse_args()
+@server.route("/analyse", methods=["POST"])
+def analyse():
+    query = request.form.get("query", "").strip()
+    mode  = request.form.get("mode", "target")
 
+    if not query:
+        return jsonify(ok=False, error="Please enter a gene or disease name.")
 
-def main():
-    args = parse_args()
+    try:
+        from stratified_precision.pipeline import run_pipeline
 
-    if args.target:
-        print(f"[Mode 1] Loading target: {args.target}")
-        context = load_target(args.target)
-    else:
-        print(f"[Mode 2] Loading patient cohort: {args.patients}")
-        context = load_patient_cohort(
-            args.patients,
-            disease_ontology_id=args.disease,
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+
+        if mode == "patient":
+            # Patient CSV upload handled separately — fall back to target mode
+            return jsonify(ok=False, error="Upload a CSV via patient mode on the dashboard.")
+
+        from stratified_precision.inputs.target_mode import load_target
+        context = load_target(query)
+
+        result = run_pipeline(
+            context,
+            run_literature_agent=bool(api_key),
+            use_hetionet=False,
+            anthropic_api_key=api_key,
         )
 
-    print("Running pipeline...")
-    result = run_pipeline(
-        context,
-        run_literature_agent=not args.no_agent,
-        use_hetionet=not args.no_hetionet,
-        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
-        kg_hops=args.kg_hops,
-    )
+        result_cache["latest"] = result
+        return jsonify(ok=True)
 
-    print(f"Done. {len(result.ranked_targets)} targets ranked. Starting dashboard on port {args.port}...")
-    run_dashboard(result, port=args.port)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify(ok=False, error=str(e))
 
 
 if __name__ == "__main__":
-    main()
+    server.run(port=8050, debug=False)
