@@ -283,18 +283,27 @@
   </div>
 
   <div class="examples">
-    <p class="examples-label">Try an example</p>
-    <div class="chips">
+    <p class="examples-label" id="examples-label">Try an example</p>
+
+    <!-- Gene / protein chips (target mode) -->
+    <div class="chips" id="chips-target">
       <span class="chip" data-val="PCSK9">🧬 PCSK9</span>
       <span class="chip" data-val="BACE1">🧬 BACE1</span>
       <span class="chip" data-val="TYK2">🧬 TYK2</span>
       <span class="chip" data-val="CFTR">🧬 CFTR</span>
       <span class="chip" data-val="EGFR">🧬 EGFR</span>
       <span class="chip" data-val="BRCA1">🧬 BRCA1</span>
-      <span class="chip" data-val="Cystic fibrosis">🫁 Cystic fibrosis</span>
-      <span class="chip" data-val="Alzheimer's disease">🧠 Alzheimer's disease</span>
-      <span class="chip" data-val="Hypercholesterolemia">❤️ Hypercholesterolemia</span>
-      <span class="chip" data-val="Lung cancer">🫁 Lung cancer</span>
+    </div>
+
+    <!-- Patient / cohort chips (patient mode) -->
+    <div class="chips" id="chips-patient" style="display:none;">
+      <span class="chip" data-val="Patient A - Cystic Fibrosis">👤 Patient A — Cystic Fibrosis</span>
+      <span class="chip" data-val="Patient B - Lupus">👤 Patient B — Lupus</span>
+      <span class="chip" data-val="Patient C - Rare Epilepsy">👤 Patient C — Rare Epilepsy</span>
+      <span class="chip" data-val="Cohort A - Alzheimer's Disease">👥 Cohort A — Alzheimer's Disease</span>
+      <span class="chip" data-val="Cohort B - Hypercholesterolemia">👥 Cohort B — Hypercholesterolemia</span>
+      <span class="chip" data-val="Cohort C - Lung Cancer">👥 Cohort C — Lung Cancer</span>
+      <span class="chip" data-val="Cohort D - Type 2 Diabetes">👥 Cohort D — Type 2 Diabetes</span>
     </div>
   </div>
 
@@ -328,12 +337,24 @@
 
   // ── Mode toggle ──────────────────────────────────────────────────────
   let mode = "target";
+
+  function setMode(m) {
+    mode = m;
+    document.querySelectorAll(".mode-btn").forEach(b =>
+      b.classList.toggle("active", b.dataset.mode === m)
+    );
+    document.getElementById("chips-target").style.display  = m === "target"  ? "flex" : "none";
+    document.getElementById("chips-patient").style.display = m === "patient" ? "flex" : "none";
+    document.getElementById("examples-label").textContent  =
+      m === "target" ? "Try an example" : "Try an example dataset";
+    document.getElementById("search-input").placeholder =
+      m === "target"
+        ? "Enter a gene (e.g. PCSK9) or disease…"
+        : "Enter a patient or cohort label…";
+  }
+
   document.querySelectorAll(".mode-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      mode = btn.dataset.mode;
-    });
+    btn.addEventListener("click", () => setMode(btn.dataset.mode));
   });
 
   // ── Chips ────────────────────────────────────────────────────────────
