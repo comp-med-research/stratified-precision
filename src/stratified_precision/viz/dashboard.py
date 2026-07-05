@@ -236,7 +236,7 @@ def _register_callbacks(app: Dash):
             return no_update
 
         cached = getattr(result, "agent_trace", None)
-        if not cached:
+        if not cached or len(cached) < 4:  # regenerate if old 3-agent trace cached
             from stratified_precision.agents.trace_agent import generate_trace
             cached = generate_trace(result)
             try:
@@ -387,7 +387,14 @@ def _register_callbacks(app: Dash):
         endotype = target_data.get("endotype_label", "")
         failure_color = PALETTE.get(failure, PALETTE["unknown"])
 
-        explanation_md = _generate_explanation(target_data)
+        # Use pre-cached explanation if this is the default (rank-1) target
+        from stratified_precision.cache import result_cache
+        _r = result_cache.get("latest")
+        _default = getattr(_r, "default_target", None) if _r else None
+        if _default and _default.get("gene_symbol") == gene:
+            explanation_md = getattr(_r, "default_explanation", None) or _generate_explanation(target_data)
+        else:
+            explanation_md = _generate_explanation(target_data)
 
         endo_line = ""
         if endotype and ":" in endotype:
@@ -443,7 +450,9 @@ def _register_callbacks(app: Dash):
     @app.callback(
         Output("dashboard-content", "children"),
         Output("result-ready-store", "data"),
+        Output("selected-target-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
+        prevent_initial_call="initial_duplicate",
     )
     def render_dashboard(pathname):
         from stratified_precision.cache import result_cache
@@ -456,8 +465,9 @@ def _register_callbacks(app: Dash):
                 html.Div(html.A("← Back to search", href="/",
                                 style={"color": "#5B8DEF"}),
                          style={"textAlign": "center", "marginTop": "16px"}),
-            ]), no_update
-        return _results_layout(result), {"ready": True}
+            ]), no_update, no_update
+        default_target = getattr(result, "default_target", None)
+        return _results_layout(result), {"ready": True}, default_target or no_update
 
 
 # ---------------------------------------------------------------------------
@@ -465,10 +475,10 @@ def _register_callbacks(app: Dash):
 # ---------------------------------------------------------------------------
 
 def _render_trace_ui(agents: list[dict]) -> html.Div:
-    AGENT_COLORS = {"🔍": "#5B8DEF", "⚗️": "#F0A500", "✂️": "#4CAF7D"}
+    AGENT_COLORS = {"📊": "#8B5CF6", "🔍": "#5B8DEF", "⚗️": "#F0A500", "✂️": "#4CAF7D"}
 
-    # ── Stepper nodes: gradient line + 3 numbered circles ──────────────
-    step_nodes: list = [html.Div(className="sp-pipeline-line")]
+    # ── Stepper nodes: circles only — connecting line is a CSS ::before ──
+    step_nodes: list = []
     for i, ag in enumerate(agents):
         color = AGENT_COLORS.get(ag.get("icon", ""), "#888")
         step_nodes.append(html.Div(className="sp-step", children=[

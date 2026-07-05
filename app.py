@@ -19,6 +19,27 @@ from flask import Flask, render_template, request, jsonify
 from stratified_precision.cache import result_cache
 from stratified_precision.result_store import cache_key, load_result, save_result
 
+def _precompute_default(result):
+    """Pick the rank-1 target and pre-generate its explanation for instant display."""
+    from stratified_precision.viz.dashboard import _generate_explanation
+    df = result.ranked_targets
+    rank_col = "pareto_rank" if result.mode == "target" else "endotype_pareto_rank"
+    rank1 = df[df[rank_col] == 1] if rank_col in df.columns else df.head(1)
+    if rank1.empty:
+        rank1 = df.head(1)
+    row = rank1.iloc[0].to_dict()
+    target_data = {
+        "gene_symbol":       str(row.get("gene_symbol", "")),
+        "disease_name":      str(row.get("disease_name", row.get("endotype_label", ""))),
+        "pareto_rank":       1,
+        "failure_mode":      str(row.get("predicted_failure_mode", "unknown")),
+        "association_score": float(row.get("association_score", 0) or 0),
+        "novelty_score":     float(row.get("novelty_score", 0) or 0),
+        "endotype_label":    str(row.get("endotype_label", "")),
+    }
+    return target_data, _generate_explanation(target_data)
+
+
 # ── Flask server ──────────────────────────────────────────────────────
 server = Flask(__name__, template_folder="templates", static_folder="static")
 server.secret_key = os.urandom(24)
@@ -101,8 +122,17 @@ def analyse():
                 anthropic_api_key=api_key,
             )
             result._cache_key = ck
+            result_cache["latest"] = result  # set before pre-compute so helpers can find it
+            try:
+                from stratified_precision.agents.trace_agent import generate_trace
+                result.agent_trace = generate_trace(result, api_key)
+            except Exception:
+                pass
+            try:
+                result.default_target, result.default_explanation = _precompute_default(result)
+            except Exception:
+                pass
             save_result(ck, result)
-            result_cache["latest"] = result
             return jsonify(ok=True, from_cache=False)
 
         ck = cache_key("target", query, disease_id or "")
@@ -122,8 +152,17 @@ def analyse():
             anthropic_api_key=api_key,
         )
         result._cache_key = ck
+        result_cache["latest"] = result  # set before pre-compute so helpers can find it
+        try:
+            from stratified_precision.agents.trace_agent import generate_trace
+            result.agent_trace = generate_trace(result, api_key)
+        except Exception:
+            pass
+        try:
+            result.default_target, result.default_explanation = _precompute_default(result)
+        except Exception:
+            pass
         save_result(ck, result)
-        result_cache["latest"] = result
         return jsonify(ok=True, from_cache=False)
 
     except Exception as e:
