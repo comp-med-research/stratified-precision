@@ -1,0 +1,365 @@
+/* ============================================================
+   Stratified Precision — Visual Theme
+   Principle: instrument precision, not product gloss.
+   One bold choice: the animated agent pipeline stepper.
+   Everything else enhances without distracting.
+   ============================================================ */
+
+/* 1. Animated page background
+   Very slow, very subtle — a living quality, not a spectacle.
+   Cool blue → soft mint drift matches the science aesthetic.
+   !important overrides the inline background on #dashboard-root. */
+#dashboard-root {
+    background: linear-gradient(
+        -35deg,
+        #eef2ff 0%,
+        #f4f7ff 20%,
+        #f0f6ff 40%,
+        #edf8f3 65%,
+        #f2f5ff 80%,
+        #eef2ff 100%
+    ) !important;
+    background-size: 300% 300% !important;
+    animation: sp-bg-drift 32s ease infinite;
+}
+
+@keyframes sp-bg-drift {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+
+/* 2. Section entrance animation
+   CSS animation — fires on DOM insert, no JS required.
+   Works for both initial render AND callback-inserted content.
+   JS can set animation-delay for stagger but content is never blocked on JS. */
+@keyframes sp-rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.sp-section {
+    animation: sp-rise 0.5s ease both;
+}
+
+
+/* 3. Card hover — lift + deepen shadow
+   sp-card doesn't override inline background/border, only adds
+   transition and transform on hover. */
+.sp-card {
+    transition: box-shadow 0.22s ease, transform 0.22s ease !important;
+}
+
+.sp-card:hover {
+    box-shadow: 0 10px 36px rgba(61, 111, 232, 0.10),
+                0 2px 8px rgba(0, 0, 0, 0.04) !important;
+    transform: translateY(-2px);
+}
+
+
+/* 4. Header accent bar
+   Gradient top-edge line + very light tinted background.
+   position: relative needed for the ::before line. */
+.sp-header {
+    background: linear-gradient(
+        135deg,
+        rgba(91, 141, 239, 0.05) 0%,
+        rgba(76, 175, 125, 0.03) 100%
+    );
+    border-radius: 12px;
+    padding: 20px 24px;
+    border: 1px solid rgba(91, 141, 239, 0.11);
+    position: relative;
+    overflow: hidden;
+}
+
+.sp-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(to right, #5B8DEF 0%, #4CAF7D 100%);
+}
+
+
+/* 5. Objective pill entrance — stagger via CSS nth-child, no JS.
+   fill-mode: both = starts at "from" state, stays at "to" state after.
+   No explicit opacity:0 base — the animation's own fill handles start state. */
+.sp-pill {
+    animation: sp-pill-in 0.32s ease both;
+    display: inline-block;
+}
+
+@keyframes sp-pill-in {
+    from { opacity: 0; transform: scale(0.82) translateY(4px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* CSS-only stagger — no JS animation-delay setting needed */
+.sp-pills .sp-pill:nth-child(1)  { animation-delay: 0.04s; }
+.sp-pills .sp-pill:nth-child(2)  { animation-delay: 0.09s; }
+.sp-pills .sp-pill:nth-child(3)  { animation-delay: 0.14s; }
+.sp-pills .sp-pill:nth-child(4)  { animation-delay: 0.19s; }
+.sp-pills .sp-pill:nth-child(5)  { animation-delay: 0.24s; }
+.sp-pills .sp-pill:nth-child(6)  { animation-delay: 0.29s; }
+.sp-pills .sp-pill:nth-child(n+7){ animation-delay: 0.32s; }
+
+
+/* 6. ============================================================
+   Agent Pipeline Stepper
+   The page's one bold visual set-piece.
+   Horizontal numbered circles connected by an animated gradient line,
+   each step's detail card rising up in sequence.
+   ============================================================ */
+
+.sp-trace-card {
+    /* Card shell styles set inline in Python; no overrides needed */
+}
+
+/* The row holding circles + the connecting line */
+.sp-pipeline-steps {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    padding: 0 48px;
+}
+
+/* Gradient connecting line — animates from left to right */
+.sp-pipeline-line {
+    position: absolute;
+    top: 18px;
+    left: 96px;
+    right: 96px;
+    height: 2px;
+    background: linear-gradient(to right, #5B8DEF 0%, #F0A500 50%, #4CAF7D 100%);
+    z-index: 0;
+    transform-origin: left center;
+    transform: scaleX(0);
+    animation: sp-line-draw 0.9s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    animation-delay: 0.05s;
+}
+
+@keyframes sp-line-draw {
+    to { transform: scaleX(1); }
+}
+
+/* Individual step column */
+.sp-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    z-index: 1;
+    min-width: 108px;
+    opacity: 0;
+    animation: sp-step-pop 0.38s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+/* nth-child(1) is .sp-pipeline-line, so steps start at 2 */
+.sp-step:nth-child(2) { animation-delay: 0.18s; }
+.sp-step:nth-child(3) { animation-delay: 0.38s; }
+.sp-step:nth-child(4) { animation-delay: 0.58s; }
+
+@keyframes sp-step-pop {
+    0%   { opacity: 0; transform: scale(0.55) translateY(8px); }
+    100% { opacity: 1; transform: scale(1)    translateY(0); }
+}
+
+/* Numbered circle */
+.sp-step-num {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    color: #fff;
+    font-weight: 700;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 8px;
+    position: relative;
+    z-index: 1;
+}
+
+.sp-step-icon {
+    font-size: 17px;
+    margin-bottom: 5px;
+    display: block;
+    text-align: center;
+}
+
+.sp-step-name {
+    font-size: 10px;
+    font-weight: 600;
+    color: #6b7280;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.065em;
+    line-height: 1.4;
+    max-width: 90px;
+}
+
+/* Three-column detail cards */
+.sp-pipeline-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 14px;
+}
+
+.sp-step-detail {
+    background: #fafbff;
+    border-radius: 8px;
+    padding: 14px 15px;
+    border: 1px solid #eef0f8;
+    opacity: 0;
+    animation: sp-rise 0.38s ease forwards;
+}
+
+.sp-step-detail:nth-child(1) { animation-delay: 0.55s; }
+.sp-step-detail:nth-child(2) { animation-delay: 0.70s; }
+.sp-step-detail:nth-child(3) { animation-delay: 0.85s; }
+
+.sp-step-summary {
+    font-size: 12px;
+    color: #5b6880;
+    line-height: 1.6;
+    margin: 0 0 10px 0;
+    font-style: italic;
+}
+
+.sp-trace-bullet {
+    font-size: 11.5px;
+    color: #555;
+    line-height: 1.6;
+    margin-bottom: 5px;
+}
+
+/* ── End pipeline stepper ──────────────────────────────── */
+
+
+/* 7. Chat toggle button — pulsing ring to invite interaction */
+@keyframes sp-chat-pulse {
+    0%   { box-shadow: 0 0 0 0   rgba(91, 141, 239, 0.48),
+                       0 4px 16px rgba(91, 141, 239, 0.45); }
+    70%  { box-shadow: 0 0 0 14px rgba(91, 141, 239, 0),
+                       0 4px 16px rgba(91, 141, 239, 0.45); }
+    100% { box-shadow: 0 0 0 0   rgba(91, 141, 239, 0),
+                       0 4px 16px rgba(91, 141, 239, 0.45); }
+}
+
+#chat-toggle-btn {
+    /* Delay first pulse so it doesn't fire immediately on load */
+    animation: sp-chat-pulse 3.2s ease-out infinite;
+    animation-delay: 3s;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+#chat-toggle-btn:hover {
+    animation: none !important;
+    transform: scale(1.12) !important;
+    box-shadow: 0 6px 24px rgba(91, 141, 239, 0.6) !important;
+}
+
+
+/* 8. Data table — cursor, row hover, full-row selection highlight.
+   :has() targets the entire <tr> when any cell inside is active/focused. */
+.dash-spreadsheet tbody tr {
+    cursor: pointer;
+}
+
+.dash-spreadsheet tbody tr:hover td {
+    background-color: rgba(91, 141, 239, 0.05) !important;
+}
+
+/* Full row highlight — when any cell in the row is the active/focused cell */
+.dash-spreadsheet tbody tr:has(td.focused) td {
+    background-color: rgba(91, 141, 239, 0.10) !important;
+    border-top: 1px solid rgba(91, 141, 239, 0.25) !important;
+    border-bottom: 1px solid rgba(91, 141, 239, 0.25) !important;
+}
+
+/* Active cell itself: slightly more distinct */
+.dash-spreadsheet td.focused {
+    outline: none !important;
+    box-shadow: inset 0 0 0 2px rgba(91, 141, 239, 0.5) !important;
+}
+
+/* Tabular numerics for data alignment */
+.dash-spreadsheet td {
+    font-variant-numeric: tabular-nums;
+}
+
+
+/* 9. Custom scrollbar — matches the accent hue */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: #c8d0e0;
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #5B8DEF;
+}
+
+
+/* 10. Reduced motion — respect system preference */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration:   0.01ms !important;
+        animation-delay:      0.01ms !important;
+        transition-duration:  0.01ms !important;
+    }
+    #dashboard-root {
+        animation: none !important;
+    }
+    .sp-section {
+        opacity: 1 !important;
+        transform: none !important;
+        transition: none !important;
+    }
+    .sp-pill {
+        opacity: 1 !important;
+    }
+    .sp-step,
+    .sp-step-detail,
+    .sp-pipeline-line {
+        opacity: 1 !important;
+        transform: none !important;
+        animation: none !important;
+    }
+}
+
+
+/* 11. Responsive pipeline — collapse to vertical on narrow viewports */
+@media (max-width: 860px) {
+    .sp-pipeline-steps {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 0;
+        gap: 16px;
+    }
+    .sp-pipeline-line {
+        display: none;
+    }
+    .sp-pipeline-details {
+        grid-template-columns: 1fr;
+    }
+    .sp-step {
+        flex-direction: row;
+        gap: 10px;
+        min-width: unset;
+    }
+    .sp-step-name {
+        text-align: left;
+    }
+}

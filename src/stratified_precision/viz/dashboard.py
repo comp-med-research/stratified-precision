@@ -71,7 +71,7 @@ def _shell_layout() -> html.Div:
     return html.Div(
         id="dashboard-root",
         style={"fontFamily": "Inter, -apple-system, sans-serif",
-               "minHeight": "100vh", "background": "#f8f9fa"},
+               "minHeight": "100vh", "background": "#f0f3fa"},
         children=[
             dcc.Location(id="url", refresh=False),
             dcc.Store(id="selected-target-store"),
@@ -204,6 +204,7 @@ def _register_callbacks(app: Dash):
             except Exception:
                 pass
         return html.Div(
+            className="sp-card",
             style={
                 "background": "#fff", "border": "1px solid #ebebeb",
                 "borderRadius": "12px", "padding": "20px 24px",
@@ -395,6 +396,7 @@ def _register_callbacks(app: Dash):
             endo_line = f" · {endotype}"
 
         return html.Div(
+            className="sp-card sp-section",
             style={
                 "background": "#fff",
                 "border": "1.5px solid #ebebeb",
@@ -462,64 +464,78 @@ def _register_callbacks(app: Dash):
 # Agent trace UI
 # ---------------------------------------------------------------------------
 
-def _render_trace_ui(agents: list[dict]) -> html.Details:
+def _render_trace_ui(agents: list[dict]) -> html.Div:
     AGENT_COLORS = {"🔍": "#5B8DEF", "⚗️": "#F0A500", "✂️": "#4CAF7D"}
 
-    agent_cards = []
+    # ── Stepper nodes: gradient line + 3 numbered circles ──────────────
+    step_nodes: list = [html.Div(className="sp-pipeline-line")]
+    for i, ag in enumerate(agents):
+        color = AGENT_COLORS.get(ag.get("icon", ""), "#888")
+        step_nodes.append(html.Div(className="sp-step", children=[
+            html.Div(str(i + 1), className="sp-step-num",
+                     style={"background": color,
+                            "boxShadow": f"0 3px 14px {color}60"}),
+            html.Span(ag.get("icon", ""), className="sp-step-icon"),
+            html.Span(ag.get("name", ""), className="sp-step-name"),
+        ]))
+
+    # ── Detail cards: one per agent, coloured top border ────────────────
+    detail_cards = []
     for ag in agents:
         color = AGENT_COLORS.get(ag.get("icon", ""), "#888")
         bullets = [
-            html.Li(b, style={"marginBottom": "5px", "lineHeight": "1.55", "fontSize": "13px",
-                               "color": "#E05A5A" if b.startswith("⚠️") else "#444"})
+            html.Li(
+                b,
+                className="sp-trace-bullet",
+                style={"color": "#c0392b", "fontWeight": "500"}
+                if b.startswith("⚠️") else {},
+            )
             for b in ag.get("bullets", [])
         ]
-        agent_cards.append(
-            html.Div(style={
-                "borderLeft": f"3px solid {color}", "paddingLeft": "14px",
-                "marginBottom": "16px",
-            }, children=[
-                html.Div(style={"display": "flex", "alignItems": "center",
-                                "marginBottom": "5px", "gap": "8px"},
-                         children=[
-                    html.Span(ag.get("icon", ""), style={"fontSize": "16px"}),
-                    html.Span(ag.get("name", ""), style={"fontWeight": "600",
-                                                          "fontSize": "13px", "color": "#111"}),
-                ]),
-                html.P(ag.get("summary", ""),
-                       style={"margin": "0 0 8px 0", "fontSize": "13px",
-                              "color": "#555", "lineHeight": "1.55"}),
-                html.Ul(bullets, style={"margin": 0, "paddingLeft": "18px"}),
-            ])
-        )
+        detail_cards.append(html.Div(
+            className="sp-step-detail",
+            style={"borderTop": f"3px solid {color}"},
+            children=[
+                html.P(ag.get("summary", ""), className="sp-step-summary"),
+                html.Ul(bullets, style={"margin": 0, "paddingLeft": "15px"}),
+            ],
+        ))
 
     return html.Details(
-        style={"marginBottom": "20px", "background": "#fff",
-               "border": "1px solid #ebebeb", "borderRadius": "12px",
-               "padding": "0"},
+        className="sp-card sp-trace-card",
+        style={
+            "background": "#fff", "border": "1px solid #ebebeb",
+            "borderRadius": "12px", "marginBottom": "20px",
+        },
         children=[
-            html.Summary(
-                style={
-                    "padding": "14px 20px", "cursor": "pointer",
-                    "listStyle": "none", "display": "flex",
-                    "alignItems": "center", "gap": "10px",
-                    "fontSize": "13px", "fontWeight": "600", "color": "#555",
+            # Collapsed header — visible at all times
+            html.Summary(style={
+                "padding": "16px 24px", "cursor": "pointer",
+                "listStyle": "none", "display": "flex",
+                "alignItems": "center", "gap": "10px",
+                "userSelect": "none",
+            }, children=[
+                html.Span("\U0001f52c", style={"fontSize": "15px"}),
+                html.Span("Agent Reasoning Pipeline", style={
+                    "fontWeight": "600", "fontSize": "13px", "color": "#555",
                     "textTransform": "uppercase", "letterSpacing": "0.05em",
-                    "userSelect": "none",
-                },
-                children=[
-                    html.Span("🔬"),
-                    html.Span("Agent Reasoning Trace"),
-                    html.Span("— click to expand",
-                              style={"fontWeight": "400", "color": "#bbb",
-                                     "textTransform": "none", "letterSpacing": "0",
-                                     "fontSize": "12px"}),
-                ],
-            ),
-            html.Div(
-                style={"padding": "4px 24px 20px 24px",
-                       "borderTop": "1px solid #f0f0f0"},
-                children=agent_cards,
-            ),
+                }),
+                html.Span("— click to expand", style={
+                    "fontWeight": "400", "color": "#bbb",
+                    "textTransform": "none", "letterSpacing": "0",
+                    "fontSize": "12px",
+                }),
+            ]),
+            # Expanded content
+            html.Div(style={
+                "padding": "4px 24px 24px", "borderTop": "1px solid #f0f0f0",
+            }, children=[
+                # Stepper row (circles + connecting line)
+                html.Div(step_nodes, className="sp-pipeline-steps",
+                         style={"marginTop": "24px"}),
+                # Detail grid (3 columns)
+                html.Div(detail_cards, className="sp-pipeline-details"),
+            ]),
         ],
     )
 
@@ -618,7 +634,7 @@ def _cross_disease_section(result) -> html.Div:
     ])
 
     return html.Div(style={"marginBottom": "20px"}, children=[
-        html.Div(style={
+        html.Div(className="sp-card sp-section", style={
             "background": "#fff", "border": "1px solid #ebebeb",
             "borderRadius": "12px", "padding": "20px 24px",
         }, children=[
@@ -647,39 +663,44 @@ def _results_layout(result) -> html.Div:
     return html.Div(
         style={"maxWidth": "1400px", "margin": "auto", "padding": "32px 24px"},
         children=[
-            # Top bar
-            html.Div(
-                style={"display": "flex", "alignItems": "center",
-                       "justifyContent": "space-between", "marginBottom": "28px"},
-                children=[
-                    html.Div([
-                        html.H2("Stratified Precision",
-                                style={"margin": "0 0 4px 0", "fontSize": "20px",
-                                       "fontWeight": "700", "color": "#111"}),
-                        html.P(
-                            f"{'Target-first' if result.mode == 'target' else 'Patient-first'} · "
-                            f"{len(result.ranked_targets)} candidates · "
-                            f"{result.endotyping.n_clusters} endotypes · "
-                            f"{len(result.pareto.objective_names)} objectives",
-                            style={"margin": 0, "color": "#888", "fontSize": "13px"},
-                        ),
-                    ]),
-                    html.A("← New search", href="/",
-                           style={
-                               "background": "transparent",
-                               "border": "1.5px solid #ddd",
-                               "borderRadius": "8px", "padding": "8px 16px",
-                               "fontSize": "13px", "color": "#555",
-                               "textDecoration": "none",
-                           }),
-                ],
-            ),
+            # Top bar — gradient accent header
+            html.Div(className="sp-header sp-section", style={"marginBottom": "24px"},
+                     children=[
+                html.Div(
+                    style={"display": "flex", "alignItems": "center",
+                           "justifyContent": "space-between"},
+                    children=[
+                        html.Div([
+                            html.H2("Stratified Precision",
+                                    style={"margin": "0 0 4px 0", "fontSize": "20px",
+                                           "fontWeight": "700", "color": "#111"}),
+                            html.P(
+                                f"{'Target-first' if result.mode == 'target' else 'Patient-first'} · "
+                                f"{len(result.ranked_targets)} candidates · "
+                                f"{result.endotyping.n_clusters} endotypes · "
+                                f"{len(result.pareto.objective_names)} objectives",
+                                style={"margin": 0, "color": "#888", "fontSize": "13px"},
+                            ),
+                        ]),
+                        html.A("← New search", href="/",
+                               style={
+                                   "background": "transparent",
+                                   "border": "1.5px solid #d0d7e8",
+                                   "borderRadius": "8px", "padding": "8px 16px",
+                                   "fontSize": "13px", "color": "#5B8DEF",
+                                   "textDecoration": "none",
+                                   "fontWeight": "500",
+                               }),
+                    ],
+                ),
+            ]),
 
             # Objective pills
             _objective_pills(result),
 
             # Two-column: UMAP + Pareto
             html.Div(
+                className="sp-section",
                 style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                        "gap": "20px", "marginBottom": "20px"},
                 children=[
@@ -693,16 +714,13 @@ def _results_layout(result) -> html.Div:
                 ],
             ),
 
-            # Agent reasoning trace (populated by callback, collapsible)
-            dcc.Loading(type="dot", color="#5B8DEF",
-                        children=html.Div(id="agent-trace-section")),
-
             # AI narrative summary (populated by callback after page renders)
             dcc.Loading(type="dot", color="#5B8DEF",
                         children=html.Div(id="nl-summary")),
 
-            # Cross-disease insights (patient mode only — rendered from static KB)
-            _cross_disease_section(result) if result.mode == "patient" else html.Div(),
+            # Agent reasoning trace — collapsible, after summary
+            dcc.Loading(type="dot", color="#5B8DEF",
+                        children=html.Div(id="agent-trace-section")),
 
             # Competitive landscape graph (target mode only)
             _graph_section(result) if result.mode == "target" else html.Div(),
@@ -711,7 +729,9 @@ def _results_layout(result) -> html.Div:
             _kg_sources_section(result) if result.kg_sources else html.Div(),
 
             # Ranked targets table — click a row to trigger AI explanation
-            _card("Ranked Targets — click a row for AI explanation", _target_table(result)),
+            html.Div(className="sp-section",
+                     children=[_card("Ranked Targets — click a row for AI explanation",
+                                     _target_table(result))]),
 
             # AI co-scientist explanation panel
             dcc.Loading(
@@ -720,6 +740,9 @@ def _results_layout(result) -> html.Div:
                 color="#5B8DEF",
                 children=html.Div(id="explanation-panel"),
             ),
+
+            # Cross-disease insights (patient mode only — after table + explanation)
+            _cross_disease_section(result) if result.mode == "patient" else html.Div(),
         ],
     )
 
@@ -738,13 +761,13 @@ def _objective_pills(result) -> html.Div:
             weight = result.objective_weights.get(name.replace("kg_", ""), 0)
             label  = name.replace("kg_", "").replace("_", " ")
             pills.append(_pill(f"KG: {label} ({weight:.2f})", "#4CAF7D"))
-    return html.Div(pills,
+    return html.Div(pills, className="sp-pills sp-section",
                     style={"display": "flex", "flexWrap": "wrap",
                            "gap": "8px", "marginBottom": "20px"})
 
 
 def _pill(label: str, color: str) -> html.Span:
-    return html.Span(label, style={
+    return html.Span(label, className="sp-pill", style={
         "background": color + "18", "color": color,
         "border": f"1px solid {color}44",
         "borderRadius": "12px", "padding": "3px 10px",
@@ -787,7 +810,7 @@ def _pareto_panel(result) -> html.Div:
             ],
         ))
 
-    return html.Div(style={
+    return html.Div(className="sp-card", style={
         "background": "#fff", "borderRadius": "12px",
         "border": "1px solid #ebebeb", "padding": "20px",
     }, children=[
@@ -799,7 +822,7 @@ def _pareto_panel(result) -> html.Div:
 
 
 def _card(title: str, content) -> html.Div:
-    return html.Div(style={
+    return html.Div(className="sp-card", style={
         "background": "#fff", "borderRadius": "12px",
         "border": "1px solid #ebebeb", "padding": "20px",
     }, children=[
@@ -811,7 +834,7 @@ def _card(title: str, content) -> html.Div:
 
 
 def _kg_sources_section(result) -> html.Div:
-    return html.Div(style={"marginBottom": "20px"}, children=[
+    return html.Div(className="sp-section", style={"marginBottom": "20px"}, children=[
         html.P("Knowledge sources selected for this disease context",
                style={"fontSize": "12px", "color": "#888", "marginBottom": "8px",
                       "fontWeight": "600", "textTransform": "uppercase",
@@ -1000,7 +1023,7 @@ def _graph_section(result) -> html.Div:
                    "◆ = Pareto-front within that endotype. "
                    "Click any target node for an AI causal explanation.")
 
-    return html.Div(style={"marginBottom": "20px"}, children=[
+    return html.Div(className="sp-section", style={"marginBottom": "20px"}, children=[
         _card(title, html.Div([
             html.P(caption, style={
                 "fontSize": "11px", "color": "#aaa",
